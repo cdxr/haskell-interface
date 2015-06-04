@@ -30,6 +30,5 @@ library
 executable print-test-module
   build-depends: base, haskell-interface, filepath
   hs-source-dirs: test/print-test-module
-  data-files: test/modules/*hs
   main-is: Main.hs
   default-language:    Haskell2010
