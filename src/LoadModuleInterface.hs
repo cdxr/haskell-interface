@@ -17,7 +17,7 @@ import qualified DataCon
 import qualified PatSyn
 import qualified Outputable as Out
 
-import Data.Interface.Module as MI
+import Data.Interface.Module
 
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
