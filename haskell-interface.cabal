@@ -16,7 +16,9 @@ library
   exposed-modules:
     LoadModuleInterface,
     Data.Interface.Module
-  -- other-modules:       
+    Data.Interface.ModuleDiff
+    Data.Interface.Change
+  -- other-modules:
   -- other-extensions:
   build-depends:
     base >=4.8 && <4.9,
