@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternGuards #-}
+
 {-| This is a temporary module that uses GHC to construct `ModuleInterface`
     values. All interaction with GHC is currently encapsulated in this module.
  -}
@@ -7,6 +9,7 @@ module LoadModuleInterface where
 import Control.Monad
 
 import GHC
+
 import qualified GHC.Paths
 
 import Name ( getOccString )
@@ -15,9 +18,11 @@ import HscTypes ( isBootSummary )
 import qualified ConLike
 import qualified DataCon
 import qualified PatSyn
+import qualified TyCon
 import qualified Outputable as Out
+import qualified InstEnv
 
-import Data.Interface.Module
+import Data.Interface.Module as Module
 
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
@@ -80,7 +85,9 @@ typecheckedModuleInterface typMod = do
     thisModule = ms_mod . pm_mod_summary . tm_parsed_module $ typMod
 
     makeClassInstance :: ClsInst -> ClassInstance
-    makeClassInstance = ClassInstance . getOccString  -- TODO
+    makeClassInstance ci =
+        ClassInstance (getOccString $ InstEnv.is_cls_nm ci)  -- class name
+                      (map makeType $ InstEnv.is_tys ci)     -- class kind
 
 
 -- | Produce an `Export` from a `GHC.Module` and a `GHC.Name` included in
@@ -102,21 +109,44 @@ nameToExport thisModule name
         -- TODO: ^ handle this properly: if `name` is not in the GHC
         --         environment, this will crash
 
-        -- Eventually, much of this information will need to be stored
-        -- in the Decl type. For now, it is just represented as a String.
-        let infoStr = case tyThing of
-                AnId a -> "Id: " ++ unsafeOutput (idType a)
-                AConLike (ConLike.RealDataCon a) ->
-                    "DataCon: " ++ unsafeOutput (DataCon.dataConRepType a)
-                AConLike (ConLike.PatSynCon a) ->
-                    "PatSyn: " ++ unsafeOutput (PatSyn.patSynType a)
-                ATyCon a -> "TyCon: " ++ unsafeOutput a
-                ACoAxiom _ -> "CoAxiom"
-
-        pure $ LocalExport (Decl nameStr infoStr)
+        pure $ LocalExport $ Decl nameStr $ makeDeclInfo tyThing
   where
     nameMod = nameModule name
     nameStr = getOccString name
+
+
+-- TODO: type families
+makeDeclInfo :: TyThing -> Module.DeclInfo
+makeDeclInfo tything = case tything of
+    ACoAxiom _ -> error "nameToExport: ACoAxiom unimplemented"
+    AnId a ->                                       -- value
+        Value $ unsafeOutput (idType a)
+    AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
+        makeDataCon dcon
+    AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
+        PatternSyn $ makeType $ PatSyn.patSynType patsyn
+    ATyCon tyCon
+        | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
+            TypeSyn kind $ unsafeOutput rhs
+        | isClassTyCon tyCon ->                     -- class definitions
+            TypeClass kind
+        | otherwise ->                              -- data/newtype/other
+            Module.DataType kind
+      where
+        kind = map getOccString (tyConTyVars tyCon)
+                    -- TODO: ^ include result type
+  where
+    makeDataCon :: GHC.DataCon -> Module.DeclInfo
+    makeDataCon dcon = DataCon $ makeType $ dataConType dcon
+      where
+        (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
+
+
+
+-- Note: `Type` and `Kind` are currently implemented as lists of Strings
+
+makeType :: GHC.Type -> Module.Type
+makeType = unsafeOutput
 
 
 -- * Utils

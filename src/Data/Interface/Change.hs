@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE GADTs #-}
 
 module Data.Interface.Change where
 
@@ -17,7 +18,7 @@ import qualified Data.Map as Map
 data Change a
     = Removed a     -- ^ the old value was removed
     | Added a       -- ^ a new value was added
-    | Change a a    -- ^ the value has been changed
+    | Change a a    -- ^ the value has changed
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 -- | The value before the change
@@ -43,6 +44,11 @@ data Diff a
     | Diff (Change a)   -- ^ value has changed
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
+maybeChange :: Diff a -> Maybe (Change a)
+maybeChange d = case d of
+    Same _ -> Nothing
+    Diff c -> Just c
+
 diffSpan :: (Eq a) => a -> a -> Diff a
 diffSpan a b
     | a /= b    = Diff (Change a b)
@@ -65,7 +71,7 @@ diffBy eq (Just a) (Just b)
 
 -- ** Set
 
--- | The differences to included elements between two sets
+-- | The differences in element inclusion between two sets
 diffSet :: (Ord a) => Set a -> Set a -> [Diff a]
 diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
   where
@@ -92,3 +98,18 @@ diffMapBy eq = Map.mergeWithKey combine only1 only2
 
     only1 = Map.map $ Diff . Removed
     only2 = Map.map $ Diff . Added
+
+
+-- * Type-constrained Changes and Diffs
+
+-- | @ADiff tag@ is a @Diff a@ where @a@ is constrained by a GADT-like @tag a@.
+data ADiff tag where
+    ADiff :: !(tag a) -> Diff a -> ADiff tag
+
+-- | @AChange tag@ is a @Change a@ where @a@ is constrained by a GADT-like
+-- @tag a@.
+data AChange tag where
+    AChange :: !(tag a) -> Change a -> AChange tag
+
+maybeAChange :: ADiff t -> Maybe (AChange t)
+maybeAChange (ADiff t d) = AChange t <$> maybeChange d
