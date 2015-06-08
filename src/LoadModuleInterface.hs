@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternGuards #-}
-
 {-| This is a temporary module that uses GHC to construct `ModuleInterface`
     values. All interaction with GHC is currently encapsulated in this module.
  -}
