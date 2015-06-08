@@ -14,9 +14,7 @@ import Name ( getOccString )
 import Digraph ( flattenSCCs )
 import HscTypes ( isBootSummary )
 import qualified ConLike
-import qualified DataCon
 import qualified PatSyn
-import qualified TyCon
 import qualified Outputable as Out
 import qualified InstEnv
 

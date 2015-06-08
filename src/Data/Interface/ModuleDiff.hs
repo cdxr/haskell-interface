@@ -6,7 +6,7 @@ module Data.Interface.ModuleDiff where
 import Data.Functor.Classes
 
 import Data.Function ( on )
-import Data.Maybe ( mapMaybe, catMaybes )
+import Data.Maybe ( mapMaybe )
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
