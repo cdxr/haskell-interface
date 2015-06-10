@@ -143,7 +143,7 @@ makeSomeDecl thing = case thing of
                     -- TODO: ^ include "result" kind
   where
     mkDecl :: DeclInfo s -> SomeDecl
-    mkDecl info = SomeDecl $ rawDecl (getOccString thing) info
+    mkDecl = someDecl . rawDecl (getOccString thing)
 
 --  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon

@@ -4,12 +4,15 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
 
+{-| Types for top-level declarations.
+-}
 module Data.Interface.Module.Decl
  (
     Decl(..)
   , ValueDecl
   , TypeDecl
   , SomeDecl(..)
+  , someDecl
   , DeclInfo(..)
   , Type
   , Kind
@@ -21,8 +24,10 @@ import Data.Interface.Name
 
 
 -- | A top-level declaration with an identifier in namespace @s@.
-data Decl s = Decl !(Name s) (DeclInfo s)
-    deriving (Show, Eq, Ord)
+data Decl s = Decl
+    { declName :: !(Name s)
+    , declInfo :: DeclInfo s
+    } deriving (Show, Eq, Ord)
 
 -- | Construct a @Decl s@ with the given `RawName`, lifted into the namespace
 -- @s@ required by the given @DeclInfo s@.
@@ -39,8 +44,21 @@ rawDecl s info = case info of
 type ValueDecl = Decl 'Values
 type TypeDecl = Decl 'Types
 
+-- | A @Decl s@ where @s@ is dynamically determined to be the value namespace
+-- or the type namespace. Enables @s@ to be recovered through pattern-matching.
 data SomeDecl where
-    SomeDecl :: !(Decl s) -> SomeDecl
+    ValueDecl :: !(Decl 'Values) -> SomeDecl
+    TypeDecl  :: !(Decl 'Types) -> SomeDecl
+
+someDecl :: Decl s -> SomeDecl
+someDecl decl = case declInfo decl of
+    Value{}      -> ValueDecl decl
+    PatternSyn{} -> ValueDecl decl
+    DataCon{}    -> ValueDecl decl
+    DataType{}   -> TypeDecl decl
+    TypeSyn{}    -> TypeDecl decl
+    TypeClass{}  -> TypeDecl decl
+
 
 deriving instance Show SomeDecl
 
@@ -53,7 +71,8 @@ instance HasNamespace (Decl s) where
 instance HasNamespace SomeDecl where
     type Space SomeDecl = 'Nothing
 
-    namespace (SomeDecl decl) = namespace decl
+    namespace ValueDecl{} = Values
+    namespace TypeDecl{}  = Types
 
 instance HasRawName (Decl s) where
     rawName (Decl name _) = rawName name
@@ -64,18 +83,18 @@ type Kind = [String]    -- ^ TODO
 
 -- | The content of a top-level declaration, without the identifier
 data DeclInfo (s :: Namespace) where
+    -- a top-level value/identifier
     Value :: String -> DeclInfo 'Values
-        -- ^ top-level value/identifier
+    -- a pattern synonym
     PatternSyn :: Type -> DeclInfo 'Values
-        -- ^ a pattern synonym
+    -- a data constructor
     DataCon :: Type -> DeclInfo 'Values
-        -- ^ a data constructor
+    -- a newtype/data declaration
     DataType :: Kind -> DeclInfo 'Types
-        -- ^ a newtype/data declaration
+    -- a type synonym w/ a kind and definition
     TypeSyn :: Kind -> String -> DeclInfo 'Types
-        -- ^ a type synonym w/ a kind and definition
+    -- a typeclass
     TypeClass :: Kind -> DeclInfo 'Types
-        -- ^ a typeclass
 
 deriving instance Show (DeclInfo s)
 deriving instance Eq (DeclInfo s)

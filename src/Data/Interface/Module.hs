@@ -91,11 +91,12 @@ addExport e = case e of
 
 
 addDecl :: SomeDecl -> ModuleInterface -> ModuleInterface
-addDecl (SomeDecl decl@(Decl name _)) modInt = case name of
-    ValueName _ -> modInt
-        {moduleValues = Map.insert name decl (moduleValues modInt)}
-    TypeName _ ->  modInt
-        {moduleTypes = Map.insert name decl (moduleTypes modInt)}
+addDecl sd modInt = case sd of
+    ValueDecl decl -> modInt
+        {moduleValues = Map.insert (declName decl) decl (moduleValues modInt)}
+    TypeDecl decl -> modInt
+        {moduleTypes = Map.insert (declName decl) decl (moduleTypes modInt)}
+
 
 addReexport :: Qual SomeName -> ModuleInterface -> ModuleInterface
 addReexport qual modInt = modInt
@@ -129,8 +130,8 @@ data Export
 
 -- | All module exports
 moduleExports :: ModuleInterface -> [Export]
-moduleExports modIf = map local (Map.elems $ moduleValues modIf)
-                   ++ map local (Map.elems $ moduleTypes modIf)
-                   ++ map Reexport (Set.toList $ moduleReexports modIf)
- where
-   local = LocalExport . SomeDecl
+moduleExports modIf = concat
+    [ map (LocalExport . ValueDecl) $ Map.elems $ moduleValues modIf
+    , map (LocalExport . TypeDecl)  $ Map.elems $ moduleTypes modIf
+    , map Reexport $ Set.toList $ moduleReexports modIf
+    ]
