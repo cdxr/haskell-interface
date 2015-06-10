@@ -90,7 +90,7 @@ typecheckedModuleInterface typMod = do
 -- that module's export list, distinguishing locally-defined
 -- exports from re-exports.
 --
--- This function will fail if GHC cannot find the `Name`.
+-- This will fail if the Ghc environment cannot find the `Name`.
 --
 -- Note: this results in qualified names that refer to the original module,
 -- rather than the imported module
@@ -99,26 +99,18 @@ nameToExport :: GHC.Module -> GHC.Name -> Ghc Module.Export
 nameToExport thisModule name = do
     Just (thing, _fixity, _, _) <- getInfo False name
     -- TODO: ^ handle this properly: if `name` is not in the GHC
-    --         environment, this will crash
+    --         environment, this will trigger an exception
+
+    let sdecl = makeSomeDecl thing
+        nameMod = nameModule name
     
     pure $ if nameMod /= thisModule
-        then 
-            Reexport $ Module.Qual (showModuleName nameMod) (tyThingName thing)
-        else
-            LocalExport $ makeSomeDecl thing
-  where
-    nameMod = nameModule name
+        then Reexport $ makeQual nameMod (someDeclName sdecl)
+        else LocalExport sdecl
 
 
-tyThingName :: GHC.TyThing -> Module.SomeName
-tyThingName thing = SomeName ns (getOccString thing)
-  where
-    ns :: Namespace
-    ns = case thing of
-            AnId{}     -> Values
-            AConLike{} -> Values
-            ATyCon{}   -> Types
-            ACoAxiom{} -> Types
+makeQual :: GHC.Module -> a -> Module.Qual a
+makeQual = Module.Qual . showModuleName
 
 
 -- TODO: type families

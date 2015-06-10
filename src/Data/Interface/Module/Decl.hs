@@ -13,6 +13,7 @@ module Data.Interface.Module.Decl
   , TypeDecl
   , SomeDecl(..)
   , someDecl
+  , someDeclName
   , DeclInfo(..)
   , Type
   , Kind
@@ -58,6 +59,11 @@ someDecl decl = case declInfo decl of
     DataType{}   -> TypeDecl decl
     TypeSyn{}    -> TypeDecl decl
     TypeClass{}  -> TypeDecl decl
+
+someDeclName :: SomeDecl -> SomeName
+someDeclName sd = case sd of
+    ValueDecl decl -> SomeName Values (rawName decl)
+    TypeDecl decl  -> SomeName Types (rawName decl)
 
 
 deriving instance Show SomeDecl
