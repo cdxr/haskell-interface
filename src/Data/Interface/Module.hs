@@ -1,3 +1,6 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE StandaloneDeriving #-}
+
 module Data.Interface.Module
  (
 -- * ModuleInterface
@@ -7,22 +10,18 @@ module Data.Interface.Module
   , emptyModuleInterface
   , makeModuleInterface
 -- ** Components
-  , ModuleName
-  , Export(..)
-  , DeclName
-  , QualName(..)
-  , qualNameString
-  , Decl(..)
-  , DeclInfo(..)
-  , Type
-  , Kind
   , ClassInstance(..)
+  , Export(..)
 -- ** Inspection
   , moduleName
   , moduleExports
-  , moduleDecls
+  , moduleValues
+  , moduleTypes
   , moduleReexports
   , moduleInstances
+-- * Re-exports
+  , module Data.Interface.Name
+  , module Data.Interface.Module.Decl
  )
 where
 
@@ -33,40 +32,46 @@ import qualified Data.Map as Map
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
+import Data.Interface.Name
 
-type ModuleName = String
-
--- | The unqualified name of a top-level declaration
-type DeclName = String
-
--- | The fully-qualified name of a top-level declaration
-data QualName = QualName !ModuleName !DeclName
-    deriving (Show, Read, Eq, Ord)
-
-qualNameString :: QualName -> String
-qualNameString (QualName m d) = m ++ '.' : d
+import Data.Interface.Module.Decl
 
 
 -- | A module's visible interface, consisting of all components that are
 -- exposed to dependent packages. ModuleInterface is the basis for comparison
 -- when examining differences between module versions.
 data ModuleInterface = ModuleInterface
-    { moduleName      :: !ModuleName
-    , moduleDecls     :: !(Map DeclName Decl)  -- ^ Locally-defined exports
-    , moduleReexports :: !(Set QualName)       -- ^ Externally-defined exports
-    , moduleInstances :: !(Set ClassInstance)  -- ^ All exposed class instances
-    } deriving (Show)
+    { moduleName       :: !ModuleName
+    -- locally-defined:
+    , moduleValues     :: !(Map ValueName ValueDecl)
+    , moduleTypes      :: !(Map TypeName TypeDecl)
+    -- re-exported:
+    , moduleReexports  :: !(Set (Qual SomeName))
+    -- implicitly exported:
+    , moduleInstances  :: !(Set ClassInstance)
+    }
+
+deriving instance Show ModuleInterface
+
 
 {- ModuleInterface notes:
-     - `moduleDecl` will be broken into several fields, distinguished
-            by namespace (TODO)
-        Note: type constructors and data constructors sharing a name
-              currently erase each other from the map
+
+   - This will only contain info that is visible to dependent packages.
+   - Re-exports are currently sets of names, but later they will map to
+     other ModuleInterfaces
+   - Class instances are only stubs now; type/data family instances are not
+     considered yet
 -}
 
 
 emptyModuleInterface :: ModuleName -> ModuleInterface
-emptyModuleInterface name = ModuleInterface name Map.empty Set.empty Set.empty
+emptyModuleInterface name = ModuleInterface
+    { moduleName      = name
+    , moduleValues    = Map.empty
+    , moduleTypes     = Map.empty
+    , moduleReexports = Set.empty
+    , moduleInstances = Set.empty
+    }
 
 makeModuleInterface
     :: ModuleName -> [Export] -> [ClassInstance] -> ModuleInterface
@@ -80,53 +85,21 @@ makeModuleInterface name exports instances =
 
 
 addExport :: Export -> ModuleInterface -> ModuleInterface
-addExport (LocalExport decl)  = addDecl decl
-addExport (ReExport qualName) = addReexport qualName
-
-addDecl :: Decl -> ModuleInterface -> ModuleInterface
-addDecl decl modInt = 
-    modInt {moduleDecls = Map.insert (declName decl) decl m0}
-  where m0 = moduleDecls modInt
-
-addReexport :: QualName -> ModuleInterface -> ModuleInterface
-addReexport qualName modInt = 
-    modInt {moduleReexports = Set.insert qualName s0}
-  where s0 = moduleReexports modInt
+addExport e = case e of
+    LocalExport decl -> addDecl decl
+    Reexport name -> addReexport name
 
 
-type Type = String      -- ^ TODO
-type Kind = [String]    -- ^ TODO
+addDecl :: SomeDecl -> ModuleInterface -> ModuleInterface
+addDecl (SomeDecl decl@(Decl name _)) modInt = case name of
+    ValueName _ -> modInt
+        {moduleValues = Map.insert name decl (moduleValues modInt)}
+    TypeName _ ->  modInt
+        {moduleTypes = Map.insert name decl (moduleTypes modInt)}
 
--- | A top-level declaration
-data Decl = Decl !DeclName DeclInfo
-    deriving (Show, Eq, Ord)
-
-declName :: Decl -> DeclName
-declName (Decl n _) = n
-
-
--- | The content of a top-level declaration, without an identifier
-data DeclInfo
-    = Value String           -- ^ top-level value/identifier
-    | PatternSyn Type        -- ^ a pattern synonym
-    | DataCon Type           -- ^ data constructor
-    | DataType Kind          -- ^ a newtype/data declaration
-    | TypeSyn Kind String    -- ^ a type synonym w/ a kind and definition
-    | TypeClass Kind         -- ^ a typeclass
-    deriving (Show, Eq, Ord)
-
-{- DeclInfo notes:
-      - Each of these constructors will later become distinct types
-      - TypeSyn contains its definition, because this affects its interface
-            (this is only a String for now, but will have to include
-             first-class type information)
-      - Type constructors will need a list of their data constructors
-      - The distinction between data constructors and other values might
-        be problematic
-
-      TODO:
-        - type/data families
--}
+addReexport :: Qual SomeName -> ModuleInterface -> ModuleInterface
+addReexport qual modInt = modInt
+        {moduleReexports = Set.insert qual (moduleReexports modInt)}
 
 
 type ClassName = String
@@ -145,14 +118,19 @@ data ClassInstance = ClassInstance !ClassName [Type]
 -}
 
 
+
 -- | An element of a module's export list
 data Export
-    = LocalExport Decl
-    | ReExport QualName
-    deriving (Show, Eq, Ord)
+    = LocalExport SomeDecl
+    | Reexport (Qual SomeName)
+    deriving (Show)
 
+--deriving instance Show Export
 
 -- | All module exports
 moduleExports :: ModuleInterface -> [Export]
-moduleExports modIf = map LocalExport (Map.elems $ moduleDecls modIf)
-                   ++ map ReExport (Set.toList $ moduleReexports modIf)
+moduleExports modIf = map local (Map.elems $ moduleValues modIf)
+                   ++ map local (Map.elems $ moduleTypes modIf)
+                   ++ map Reexport (Set.toList $ moduleReexports modIf)
+ where
+   local = LocalExport . SomeDecl

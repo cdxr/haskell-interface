@@ -55,10 +55,10 @@ ansiModuleChange (AChange t c) = ansiChangeWith (showModuleElem t) c
   where
     showModuleElem :: ModuleElem a -> a -> String
     showModuleElem tag = case tag of
-        Name'     -> showString "Module Name: " . show
-        Decl'     -> show
-        Reexport' -> showString "Re-export: " . show
-        Instance' -> show
+        Name'{}     -> showString "Module Name: " . show
+        Decl'{}     -> show
+        Reexport'{} -> showString "Re-export: " . show
+        Instance'{} -> show
 
 
 ansiChangeWith :: (a -> String) -> Change a -> String

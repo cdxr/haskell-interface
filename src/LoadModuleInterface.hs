@@ -95,48 +95,60 @@ typecheckedModuleInterface typMod = do
 -- Note: this results in qualified names that refer to the original module,
 -- rather than the imported module
 --  (e.g. Data.List.foldr will appear as Data.Foldable.foldr)
-nameToExport :: Module -> Name -> Ghc Export
-nameToExport thisModule name
-    | nameMod /= thisModule =
-        pure $ ReExport $ QualName (showModuleName nameMod) nameStr
-
-    | otherwise = do
-        Just (tyThing, _fixity, _, _) <- getInfo False name
-        -- TODO: ^ handle this properly: if `name` is not in the GHC
-        --         environment, this will crash
-
-        pure $ LocalExport $ Decl nameStr $ makeDeclInfo tyThing
+nameToExport :: GHC.Module -> GHC.Name -> Ghc Module.Export
+nameToExport thisModule name = do
+    Just (thing, _fixity, _, _) <- getInfo False name
+    -- TODO: ^ handle this properly: if `name` is not in the GHC
+    --         environment, this will crash
+    
+    pure $ if nameMod /= thisModule
+        then 
+            Reexport $ Module.Qual (showModuleName nameMod) (tyThingName thing)
+        else
+            LocalExport $ makeSomeDecl thing
   where
     nameMod = nameModule name
-    nameStr = getOccString name
+
+
+tyThingName :: GHC.TyThing -> Module.SomeName
+tyThingName thing = SomeName ns (getOccString thing)
+  where
+    ns :: Namespace
+    ns = case thing of
+            AnId{}     -> Values
+            AConLike{} -> Values
+            ATyCon{}   -> Types
+            ACoAxiom{} -> Types
 
 
 -- TODO: type families
-makeDeclInfo :: TyThing -> Module.DeclInfo
-makeDeclInfo tything = case tything of
-    ACoAxiom _ -> error "nameToExport: ACoAxiom unimplemented"
+makeSomeDecl :: GHC.TyThing -> Module.SomeDecl
+makeSomeDecl thing = case thing of
+    ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        Value $ unsafeOutput (idType a)
+        mkDecl $ Value $ unsafeOutput (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        makeDataCon dcon
+        mkDecl $ makeDataCon dcon
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        PatternSyn $ makeType $ PatSyn.patSynType patsyn
+        mkDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            TypeSyn kind $ unsafeOutput rhs
+            mkDecl $ TypeSyn kind $ unsafeOutput rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            TypeClass kind
+            mkDecl $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            Module.DataType kind
+            mkDecl $ Module.DataType kind
       where
         kind = map getOccString (tyConTyVars tyCon)
-                    -- TODO: ^ include result type
+                    -- TODO: ^ include "result" kind
   where
-    makeDataCon :: GHC.DataCon -> Module.DeclInfo
+    mkDecl :: DeclInfo s -> SomeDecl
+    mkDecl info = SomeDecl $ rawDecl (getOccString thing) info
+
+--  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon
       where
         (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
-
 
 
 -- Note: `Type` and `Kind` are currently implemented as lists of Strings
@@ -154,6 +166,7 @@ makeType = unsafeOutput
 -- __All uses of this function are temporary placeholders.__
 unsafeOutput :: (Out.Outputable a) => a -> String
 unsafeOutput = Out.showSDocUnsafe . Out.ppr
+
 
 showModuleName :: Module -> String
 showModuleName = moduleNameString . GHC.moduleName

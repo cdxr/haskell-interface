@@ -14,8 +14,10 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
-    LoadModuleInterface,
+    LoadModuleInterface
+    Data.Interface.Name
     Data.Interface.Module
+    Data.Interface.Module.Decl
     Data.Interface.ModuleDiff
     Data.Interface.Change
   -- other-modules:

@@ -21,10 +21,9 @@ import Data.Interface.Change
 --
 data ModuleDiff = ModuleDiff
     { diffModuleName      :: !(Diff ModuleName)
-        -- ^ possibly-changed ModuleName
-    , diffModuleDecls     :: !(Map DeclName (Diff Decl))
-        -- ^ map from names to changes
-    , diffModuleReexports :: [Diff QualName]
+    , diffModuleValues    :: !(Map ValueName (Diff ValueDecl))
+    , diffModuleTypes     :: !(Map TypeName (Diff TypeDecl))
+    , diffModuleReexports :: [Diff (Qual SomeName)]
     , diffModuleInstances :: [Diff ClassInstance]
     } deriving (Show)
 
@@ -32,7 +31,8 @@ data ModuleDiff = ModuleDiff
 moduleDiff :: ModuleInterface -> ModuleInterface -> ModuleDiff
 moduleDiff a b = ModuleDiff
     { diffModuleName      = on diffSpan moduleName a b
-    , diffModuleDecls     = on diffMapEq moduleDecls a b
+    , diffModuleValues    = on diffMapEq moduleValues a b
+    , diffModuleTypes     = on diffMapEq moduleTypes a b
     , diffModuleReexports = on diffSet moduleReexports a b
     , diffModuleInstances = on diffSet moduleInstances a b
     }
@@ -41,19 +41,26 @@ moduleDiff a b = ModuleDiff
 -- | A GADT enumeration of each type of element found in a ModuleInterface
 data ModuleElem a where
     Name'     :: ModuleElem ModuleName
-    Decl'     :: ModuleElem Decl
-    Reexport' :: ModuleElem QualName
+    Decl'     :: ModuleElem (Decl s)
+    Reexport' :: ModuleElem (Qual SomeName)
     Instance' :: ModuleElem ClassInstance
+
+{- ModuleElem notes:
+     - ADiff and AChange can be parameterized over ModuleElem to produce a
+       sum type representing a single module diff/change
+-}
 
 
 elemDiffs :: ModuleDiff -> [ADiff ModuleElem]
 elemDiffs mdiff =
     concat $
         [ ADiff Name' <$> [diffModuleName mdiff]
-        , ADiff Decl' <$> (Map.elems $ diffModuleDecls mdiff)
+        , ADiff Decl' <$> (Map.elems $ diffModuleValues mdiff)
+        , ADiff Decl' <$> (Map.elems $ diffModuleTypes mdiff)
         , ADiff Reexport' <$> (diffModuleReexports mdiff)
         , ADiff Instance' <$> (diffModuleInstances mdiff)
         ]
+    
 
 elemChanges :: ModuleDiff -> [AChange ModuleElem]
 elemChanges = mapMaybe maybeAChange . elemDiffs
@@ -61,8 +68,8 @@ elemChanges = mapMaybe maybeAChange . elemDiffs
 
 instance Show (ModuleElem a) where
     showsPrec _ t = showString $ case t of
-        Name' -> "Name'"
-        Decl' -> "Decl'"
+        Name'     -> "Name'"
+        Decl'     -> "Decl'"
         Reexport' -> "Reexport'"
         Instance' -> "Instance'"
 
