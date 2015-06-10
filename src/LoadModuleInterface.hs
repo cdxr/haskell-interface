@@ -17,8 +17,13 @@ import qualified ConLike
 import qualified PatSyn
 import qualified Outputable as Out
 import qualified InstEnv
+import qualified SrcLoc
+import qualified FastString
 
 import Data.Interface.Module as Module
+import Data.Interface.Source as Source
+
+import Debug.Trace  -- TODO
 
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
@@ -75,7 +80,7 @@ typecheckedModuleInterface typMod = do
     pure $ makeModuleInterface modName exports instances
   where
     modInfo = moduleInfo typMod
-    modName = showModuleName thisModule
+    modName = makeModuleName thisModule
 
     thisModule :: Module
     thisModule = ms_mod . pm_mod_summary . tm_parsed_module $ typMod
@@ -101,7 +106,7 @@ nameToExport thisModule name = do
     -- TODO: ^ handle this properly: if `name` is not in the GHC
     --         environment, this will trigger an exception
 
-    let sdecl = makeSomeDecl thing
+    let sdecl = thingToSomeDecl thing
         nameMod = nameModule name
     
     pure $ if nameMod /= thisModule
@@ -110,12 +115,12 @@ nameToExport thisModule name = do
 
 
 makeQual :: GHC.Module -> a -> Module.Qual a
-makeQual = Module.Qual . showModuleName
+makeQual = Module.Qual . makeModuleName
 
 
 -- TODO: type families
-makeSomeDecl :: GHC.TyThing -> Module.SomeDecl
-makeSomeDecl thing = case thing of
+thingToSomeDecl :: GHC.TyThing -> Module.SomeDecl
+thingToSomeDecl thing = case thing of
     ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
     AnId a ->                                       -- value
         mkDecl $ Value $ unsafeOutput (idType a)
@@ -135,12 +140,30 @@ makeSomeDecl thing = case thing of
                     -- TODO: ^ include "result" kind
   where
     mkDecl :: DeclInfo s -> SomeDecl
-    mkDecl = someDecl . rawDecl (getOccString thing)
+    mkDecl = someDecl . nameToDecl (getName thing)
 
 --  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon
       where
         (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
+
+
+nameToDecl :: GHC.Name -> DeclInfo s -> Decl s
+nameToDecl name = makeDecl (getOccString name) (makeSource name)
+
+
+makeSource :: GHC.Name -> Maybe Source
+makeSource name = case nameSrcSpan name of
+    RealSrcSpan ss ->
+        let path = FastString.unpackFS $ srcSpanFile ss
+            loc0 = SrcLoc.realSrcSpanStart ss
+            loc1 = SrcLoc.realSrcSpanEnd ss
+        in Just $ Source path $ SrcSpan (mkLoc loc0) (mkLoc loc1)
+    us@UnhelpfulSpan{} ->
+        trace ("TRACE makeDecl: " ++ show us) Nothing   -- TODO
+  where
+    mkLoc :: GHC.RealSrcLoc -> Source.SrcLoc
+    mkLoc loc = Source.SrcLoc (srcLocLine loc) (srcLocCol loc)
 
 
 -- Note: `Type` and `Kind` are currently implemented as lists of Strings
@@ -160,8 +183,8 @@ unsafeOutput :: (Out.Outputable a) => a -> String
 unsafeOutput = Out.showSDocUnsafe . Out.ppr
 
 
-showModuleName :: Module -> String
-showModuleName = moduleNameString . GHC.moduleName
+makeModuleName :: Module -> Module.ModuleName
+makeModuleName = moduleNameString . GHC.moduleName
 
 
 -- | Run a simple GHC session with default session flags

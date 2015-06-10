@@ -9,6 +9,7 @@
 module Data.Interface.Module.Decl
  (
     Decl(..)
+  , makeDecl
   , ValueDecl
   , TypeDecl
   , SomeDecl(..)
@@ -17,29 +18,30 @@ module Data.Interface.Module.Decl
   , DeclInfo(..)
   , Type
   , Kind
-  , rawDecl
  )
 where
 
 import Data.Interface.Name
+import Data.Interface.Source
 
 
 -- | A top-level declaration with an identifier in namespace @s@.
 data Decl s = Decl
-    { declName :: !(Name s)
-    , declInfo :: DeclInfo s
+    { declName :: !(Name s)       -- ^ the identifier (lhs)
+    , declInfo :: DeclInfo s      -- ^ the content (rhs)
+    , declSrc  :: Maybe Source    -- ^ the source location
     } deriving (Show, Eq, Ord)
 
 -- | Construct a @Decl s@ with the given `RawName`, lifted into the namespace
 -- @s@ required by the given @DeclInfo s@.
-rawDecl :: RawName -> DeclInfo s -> Decl s
-rawDecl s info = case info of
-    Value{}      -> Decl (ValueName s) info
-    PatternSyn{} -> Decl (ValueName s) info
-    DataCon{}    -> Decl (ValueName s) info
-    DataType{}   -> Decl (TypeName s) info
-    TypeSyn{}    -> Decl (TypeName s) info
-    TypeClass{}  -> Decl (TypeName s) info
+makeDecl :: RawName -> Maybe Source -> DeclInfo s -> Decl s
+makeDecl s msrc info = case info of
+    Value{}      -> Decl (ValueName s) info msrc
+    PatternSyn{} -> Decl (ValueName s) info msrc
+    DataCon{}    -> Decl (ValueName s) info msrc
+    DataType{}   -> Decl (TypeName s) info msrc
+    TypeSyn{}    -> Decl (TypeName s) info msrc
+    TypeClass{}  -> Decl (TypeName s) info msrc
 
 
 type ValueDecl = Decl 'Values
@@ -72,7 +74,7 @@ deriving instance Show SomeDecl
 instance HasNamespace (Decl s) where
     type Space (Decl s) = 'Just s
 
-    namespace (Decl name _) = namespace name
+    namespace (Decl name _ _) = namespace name
 
 instance HasNamespace SomeDecl where
     type Space SomeDecl = 'Nothing
@@ -81,7 +83,7 @@ instance HasNamespace SomeDecl where
     namespace TypeDecl{}  = Types
 
 instance HasRawName (Decl s) where
-    rawName (Decl name _) = rawName name
+    rawName (Decl name _ _) = rawName name
 
 
 type Type = String      -- ^ TODO

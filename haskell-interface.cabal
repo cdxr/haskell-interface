@@ -16,6 +16,7 @@ library
   exposed-modules:
     LoadModuleInterface
     Data.Interface.Name
+    Data.Interface.Source
     Data.Interface.Module
     Data.Interface.Module.Decl
     Data.Interface.ModuleDiff
