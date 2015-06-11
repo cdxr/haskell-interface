@@ -50,22 +50,21 @@ reportChanges mdiff = do
     ANSI.setSGR [ANSI.Reset]
 
 
-ansiModuleChange :: AChange ModuleElem -> String
-ansiModuleChange (AChange t c) = ansiChangeWith (showModuleElem t) c
+ansiModuleChange :: AnElemChange ModuleElem -> String
+ansiModuleChange (TagF t c) = ansiChangeWith (showModuleElem t) c
   where
     showModuleElem :: ModuleElem a -> a -> String
     showModuleElem tag = case tag of
-        Name'{}     -> showString "Module Name: " . show
         Decl'{}     -> show
         Reexport'{} -> showString "Re-export: " . show
         Instance'{} -> show
 
 
-ansiChangeWith :: (a -> String) -> Change a -> String
+ansiChangeWith :: (a -> String) -> ElemChange a -> String
 ansiChangeWith show' c = case c of
     Removed a  -> setColor ANSI.Red ++ "-  " ++ show' a
     Added a    -> setColor ANSI.Green ++ "+  " ++ show' a
-    Change a b ->
+    Replaced a b ->
         setColor ANSI.Blue ++ "   " ++ show' a ++ "\n => " ++ show' b
   where
     setColor :: ANSI.Color -> String

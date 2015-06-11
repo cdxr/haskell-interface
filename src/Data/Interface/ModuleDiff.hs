@@ -20,27 +20,30 @@ import Data.Interface.Change
 -- before or after the changes.
 --
 data ModuleDiff = ModuleDiff
-    { diffModuleName      :: !(Diff ModuleName)
-    , diffModuleValues    :: !(Map ValueName (Diff ValueDecl))
-    , diffModuleTypes     :: !(Map TypeName (Diff TypeDecl))
-    , diffModuleReexports :: [Diff (Qual SomeName)]
-    , diffModuleInstances :: [Diff ClassInstance]
+    { diffModuleName      :: !(Diff Change ModuleName)
+    , diffModuleValues    :: !(Map ValueName (Diff ElemChange ValueDecl))
+    , diffModuleTypes     :: !(Map TypeName (Diff ElemChange TypeDecl))
+    , diffModuleReexports :: [Diff ElemChange (Qual SomeName)]
+    , diffModuleInstances :: [Diff ElemChange ClassInstance]
     } deriving (Show)
 
 
 moduleDiff :: ModuleInterface -> ModuleInterface -> ModuleDiff
 moduleDiff a b = ModuleDiff
-    { diffModuleName      = on diffSpan moduleName a b
-    , diffModuleValues    = on diffMapEq moduleValues a b
-    , diffModuleTypes     = on diffMapEq moduleTypes a b
+    { diffModuleName      = on diffEq moduleName a b
+    , diffModuleValues    = on (diffMap declDiff) moduleValues a b
+    , diffModuleTypes     = on (diffMap declDiff) moduleTypes a b
     , diffModuleReexports = on diffSet moduleReexports a b
     , diffModuleInstances = on diffSet moduleInstances a b
     }
 
 
+declDiff :: Name s -> Decl s -> Decl s -> Diff Change (Decl s)
+declDiff _ = diffEq
+
+
 -- | A GADT enumeration of each type of element found in a ModuleInterface
 data ModuleElem a where
-    Name'     :: ModuleElem ModuleName
     Decl'     :: ModuleElem (Decl s)
     Reexport' :: ModuleElem (Qual SomeName)
     Instance' :: ModuleElem ClassInstance
@@ -51,24 +54,22 @@ data ModuleElem a where
 -}
 
 
-elemDiffs :: ModuleDiff -> [ADiff ModuleElem]
+elemDiffs :: ModuleDiff -> [ADiff ElemChange ModuleElem]
 elemDiffs mdiff =
     concat $
-        [ ADiff Name' <$> [diffModuleName mdiff]
-        , ADiff Decl' <$> (Map.elems $ diffModuleValues mdiff)
-        , ADiff Decl' <$> (Map.elems $ diffModuleTypes mdiff)
-        , ADiff Reexport' <$> (diffModuleReexports mdiff)
-        , ADiff Instance' <$> (diffModuleInstances mdiff)
+        [ TagF Decl' <$> (Map.elems $ diffModuleValues mdiff)
+        , TagF Decl' <$> (Map.elems $ diffModuleTypes mdiff)
+        , TagF Reexport' <$> (diffModuleReexports mdiff)
+        , TagF Instance' <$> (diffModuleInstances mdiff)
         ]
     
 
-elemChanges :: ModuleDiff -> [AChange ModuleElem]
+elemChanges :: ModuleDiff -> [AnElemChange ModuleElem]
 elemChanges = mapMaybe maybeAChange . elemDiffs
 
 
 instance Show (ModuleElem a) where
     showsPrec _ t = showString $ case t of
-        Name'     -> "Name'"
         Decl'     -> "Decl'"
         Reexport' -> "Reexport'"
         Instance' -> "Instance'"

@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Data.Interface.Change where
 
@@ -12,59 +13,56 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 
 
--- * Change
+-- * Change Types
 
--- | A change in the content or presence of a value.
-data Change a
-    = Removed a     -- ^ the old value was removed
-    | Added a       -- ^ a new value was added
-    | Change a a    -- ^ the value has changed
+-- | @Change a@ represents an "old" value of @a@ paired with a corresponding
+-- "new" value of @a@. The meaning of the @Change@ is entirely dependent on
+-- context.
+data Change a = Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
--- | The value before the change
-old :: Change a -> Maybe a
-old c = case c of
-    Removed a  -> Just a
-    Added _    -> Nothing
-    Change a _ -> Just a
 
--- | The value after the change
-new :: Change a -> Maybe a
-new c = case c of
-    Removed _  -> Nothing
-    Added a    -> Just a
-    Change _ a -> Just a
+-- | @ElemChange a@ is similar to @Change a@, except that either the old
+-- or new value may not be present.
+data ElemChange a
+    = Removed a     -- ^ the old value
+    | Added a       -- ^ the new value
+    | Replaced a a  -- ^ the old and new values
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+replace :: Change a -> ElemChange a
+replace (Change a b) = Replaced a b
 
 
 -- * Diff
 
--- | A potential change in the content or presence of a value
-data Diff a
-    = Same a            -- ^ value has not changed
-    | Diff (Change a)   -- ^ value has changed
+-- | When @f a@ represents a change to a value of type @a@, @Diff f a@
+-- is only a _potential_ change.
+data Diff f a = Same a | Diff (f a)
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-maybeChange :: Diff a -> Maybe (Change a)
+mapDiff :: (a -> b) -> (f a -> g b) -> Diff f a -> Diff g b
+mapDiff sameF diffF d = case d of
+    Same a  -> Same (sameF a)
+    Diff fa -> Diff (diffF fa)
+
+maybeChange :: Diff f a -> Maybe (f a)
 maybeChange d = case d of
     Same _ -> Nothing
     Diff c -> Just c
 
-diffSpan :: (Eq a) => a -> a -> Diff a
-diffSpan a b
+diffEq :: (Eq a) => a -> a -> Diff Change a
+diffEq a b
     | a /= b    = Diff (Change a b)
     | otherwise = Same b
 
-diffEq :: (Eq a) => Maybe a -> Maybe a -> Maybe (Diff a)
-diffEq = diffBy (==)
-{-# INLINABLE diffEq #-}
-
-diffBy :: (a -> a -> Bool) -> Maybe a -> Maybe a -> Maybe (Diff a)
-diffBy _ Nothing  Nothing  = Nothing
-diffBy _ (Just a) Nothing  = Just $ Diff (Removed a)
-diffBy _ Nothing  (Just b) = Just $ Diff (Added b)
-diffBy eq (Just a) (Just b)
-    | a `eq` b  = Just $ Same b
-    | otherwise = Just $ Diff (Change a b)
+diffMaybe :: (Eq a) => Maybe a -> Maybe a -> Maybe (Diff ElemChange a)
+diffMaybe Nothing Nothing = Nothing
+diffMaybe (Just a) Nothing = Just $ Diff (Removed a)
+diffMaybe Nothing (Just b) = Just $ Diff (Added b)
+diffMaybe (Just a) (Just b)
+    | a /= b    = Just $ Diff (Replaced a b)
+    | otherwise = Just $ Same b
 
 
 -- * Computing Diffs for structures
@@ -72,7 +70,7 @@ diffBy eq (Just a) (Just b)
 -- ** Set
 
 -- | The differences in element inclusion between two sets
-diffSet :: (Ord a) => Set a -> Set a -> [Diff a]
+diffSet :: (Ord a) => Set a -> Set a -> [Diff ElemChange a]
 diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
   where
     go [] ys = map (Diff . Added) ys
@@ -85,31 +83,24 @@ diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
 
 -- ** Map
 
-diffMapEq :: (Ord k, Eq a) => Map k a -> Map k a -> Map k (Diff a)
-diffMapEq = diffMapBy (==)
-{-# INLINABLE diffMapBy #-}
-
-
-diffMapBy
-    :: (Ord k) => (a -> a -> Bool) -> Map k a -> Map k a -> Map k (Diff a)
-diffMapBy eq = Map.mergeWithKey combine only1 only2
+diffMap :: (Ord k) =>
+    (k -> a -> a -> Diff Change a) ->
+    Map k a -> Map k a -> Map k (Diff ElemChange a)
+diffMap mkDiff = Map.mergeWithKey combine only1 only2
   where
-    combine _ x y = diffBy eq (Just x) (Just y)
-
+    combine k x y = Just $ mapDiff id replace $ mkDiff k x y
     only1 = Map.map $ Diff . Removed
     only2 = Map.map $ Diff . Added
 
 
 -- * Type-constrained Changes and Diffs
 
--- | @ADiff tag@ is a @Diff a@ where @a@ is constrained by a GADT-like @tag a@.
-data ADiff tag where
-    ADiff :: !(tag a) -> Diff a -> ADiff tag
+data TagF f tag where
+    TagF :: !(tag a) -> f a -> TagF f tag
 
--- | @AChange tag@ is a @Change a@ where @a@ is constrained by a GADT-like
--- @tag a@.
-data AChange tag where
-    AChange :: !(tag a) -> Change a -> AChange tag
+type ADiff f = TagF (Diff f)
+type AChange = TagF Change
+type AnElemChange = TagF ElemChange
 
-maybeAChange :: ADiff t -> Maybe (AChange t)
-maybeAChange (ADiff t d) = AChange t <$> maybeChange d
+maybeAChange :: TagF (Diff f) tag -> Maybe (TagF f tag)
+maybeAChange (TagF tag adiff) = TagF tag <$> maybeChange adiff
