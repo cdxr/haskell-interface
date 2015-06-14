@@ -94,17 +94,27 @@ instance Format TypeChange where
 instance Format (Name s) where
     format = rawName
 
+instance Format Type where
+    format t = "(" ++ showType t ++ ") " ++ show t
+
+instance Format Kind where
+    format k = "(" ++ showKind k ++ ") " ++ show k
+
 instance Format ValueDecl where
-    format = show
+    format vd = con ++ " " ++ format (typeOf vd)
+      where
+        con = case vd of
+                Value{}      -> "Value"
+                PatternSyn{} -> "PatternSyn"
+                DataCon{}    -> "DataCon"
 
 instance Format TypeDecl where
-    format td = case td of
-        DataType k ->
-            "DataType (" ++ showKind k ++ ")"
-        TypeSyn k def ->
-            "TypeSyn (" ++ showKind k ++ ")" ++ def
-        TypeClass k ->
-            "TypeClass (" ++ showKind k ++ ")"
+    format td = con ++ " " ++ format (kindOf td)
+      where
+        con = case td of
+            DataType{}  -> "DataType"
+            TypeSyn{}   -> "TypeSyn"
+            TypeClass{} -> "TypeClass"
 
 
 instance (Format a) => Format (Named a) where

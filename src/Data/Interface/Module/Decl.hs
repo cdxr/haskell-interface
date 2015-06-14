@@ -10,9 +10,11 @@ module Data.Interface.Module.Decl
 
   , Type
   , ValueDecl(..)
+  , typeOf
 
   , Kind
   , TypeDecl(..)
+  , kindOf
  )
 where
 
@@ -21,10 +23,16 @@ import Data.Interface.Type
 
 
 data ValueDecl
-    = Value String
+    = Value Type
     | PatternSyn Type
     | DataCon Type
     deriving (Show, Eq, Ord)
+
+typeOf :: ValueDecl -> Type
+typeOf vd = case vd of
+    Value t -> t
+    PatternSyn t -> t
+    DataCon t -> t
 
 instance HasNamespace ValueDecl where
     type Space ValueDecl = 'Just 'Values
@@ -36,6 +44,12 @@ data TypeDecl
     | TypeSyn Kind String
     | TypeClass Kind
     deriving (Show, Eq, Ord)
+
+kindOf :: TypeDecl -> Kind
+kindOf td = case td of
+    DataType k -> k
+    TypeSyn k _ -> k
+    TypeClass k -> k
 
 instance HasNamespace TypeDecl where
     type Space TypeDecl = 'Just 'Types

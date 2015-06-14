@@ -127,53 +127,79 @@ thingToSomeDecl :: GHC.TyThing -> Module.SomeDecl
 thingToSomeDecl thing = case thing of
     ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        mkValue $ Value $ unsafeOutput (idType a)
+        mkValueDecl $ Value $ makeType (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        mkValue $ makeDataCon dcon
+        mkValueDecl $ DataCon $ makeType $ dataConType dcon
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        mkValue $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
+        mkValueDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            mkType $ TypeSyn kind $ unsafeOutput rhs
+            mkTypeDecl $ TypeSyn kind $ unsafeOutput rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            mkType $ TypeClass kind
+            mkTypeDecl $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            mkType $ Module.DataType kind
+            mkTypeDecl $ Module.DataType kind
       where
-        kind = makeKind tyCon
-                    -- TODO: ^ include "result" kind
+        kind = tyconKind tyCon
   where
-    mkValue :: ValueDecl -> SomeDecl
-    mkValue = SomeValue . makeNamed (getName thing)
+    mkValueDecl :: ValueDecl -> SomeDecl
+    mkValueDecl = SomeValue . makeNamed (getName thing)
 
-    mkType :: TypeDecl -> SomeDecl
-    mkType = SomeType . makeNamed (getName thing)
-
---  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
-    makeDataCon dcon = DataCon $ makeType $ dataConType dcon
-      where
-        (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
+    mkTypeDecl :: TypeDecl -> SomeDecl
+    mkTypeDecl = SomeType . makeNamed (getName thing)
 
 
-makeKind :: GHC.TyCon -> Module.Kind
-makeKind tyCon = trace t $
+makeType :: GHC.Type -> Module.Type
+makeType t0 = case splitForAllTys t0 of
+    ([], t)
+        | Just tyVar <- Type.getTyVar_maybe t ->
+            Var $ makeTypeVar tyVar
+        | Just (ta, tb) <- Type.splitFunTy_maybe t ->
+            FunType $ makeType ta :-> makeType tb
+        | Just (ta, tb) <- Type.splitAppTy_maybe t ->
+            AppType (makeType ta) (makeType tb)
+        | otherwise ->
+            Type (unsafeOutput t) (makeKind $ Type.typeKind t)
+    (vs, t) ->
+        Forall (map makeTypeVar vs) (makeType t)
+  where
+    makeTypeVar :: GHC.TyVar -> TypeVar
+    makeTypeVar tyVar =
+        TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
+{-
+        error $ "makeType: unimplemented type: " ++ unsafeOutput t ++ " " ++
+            case () of
+              () | Just _ <- Type.isNumLitTy t -> "(NumLitTy)"
+                 | Just _ <- Type.isStrLitTy t -> "(StringLitTy)"
+                 | Type.isDictLikeTy t -> "(DictLikeTy)"
+                 | Type.isPrimitiveType t -> "(Primitive)"
+                 | Type.isAlgType t -> "(AlgType)"
+                 | otherwise -> ""
+-}
+
+
+-- TODO: promoted types
+makeKind :: GHC.Kind -> Module.Kind
+makeKind k
+    | Just (ka, kb) <- Type.splitFunTy_maybe k =
+        FunKind $ makeKind ka :-> makeKind kb
+    | Kind.isLiftedTypeKind k   = StarKind
+    | Kind.isUnliftedTypeKind k = HashKind
+    | Kind.isConstraintKind k   = ConstraintKind
+    | otherwise =
+        error $ "makeKind: unimplemented Kind: " ++ unsafeOutput k
+
+tyconKind :: GHC.TyCon -> Module.Kind
+tyconKind tyCon = trace t $
     go (map Type.typeKind . Type.mkTyVarTys $ tyConTyVars tyCon)
        (synTyConResKind tyCon)
   where
     go :: [GHC.Kind] -> GHC.Kind -> Module.Kind
-    go [] res = mk res
-    go (a:args) res = ApplyKind $ mk a :-> go args res
-
-    -- TODO: promoted types
-    mk :: GHC.Kind -> Module.Kind
-    mk k | Kind.isLiftedTypeKind k   = StarKind
-         | Kind.isUnliftedTypeKind k = HashKind
-         | Kind.isConstraintKind k = ConstraintKind
-         | otherwise =
-             error $ "makeKind: unimplemented Kind: " ++ unsafeOutput k
+    go [] res = makeKind res
+    go (a:args) res = FunKind $ makeKind a :-> go args res
         
     t = unwords
-            [ "TRACE makeKind:"
+            [ "TRACE tyconKind:"
             , getOccString tyCon
             , show $ map (unsafeOutput . Var.varType) $ tyConTyVars tyCon
             , unsafeOutput $ synTyConResKind tyCon
@@ -199,11 +225,6 @@ makeOrigin ghcName = case nameSrcSpan ghcName of
     mkLoc :: GHC.RealSrcLoc -> Module.SrcLoc
     mkLoc loc = Module.SrcLoc (srcLocLine loc) (srcLocCol loc)
 
-
--- Note: `Type` and `Kind` are currently implemented as lists of Strings
-
-makeType :: GHC.Type -> Module.Type
-makeType = unsafeOutput
 
 
 -- * Utils

@@ -25,9 +25,12 @@ module Test
 
   , LocalTypeFamily         -- locally-defined type family
 
+{-
+    -- TODO  promoted types:
   , PromotedType(..)
   , HasPromoted(..)
   , hasPromoted
+-}
 
 -- * Re-exports
   , Bool                    -- re-export type
