@@ -1,6 +1,13 @@
 module Data.Interface.Source where
 
 
+-- | The origin of a declaration
+data Origin
+    = WiredIn              -- ^ built into the compiler
+    | UnknownSource        -- ^ source location is unknown
+    | KnownSource !Source  -- ^ the known source
+    deriving (Show, Read, Eq, Ord)
+
 data Source = Source !FilePath !SrcSpan
     deriving (Show, Read, Eq, Ord)
 

@@ -23,8 +23,6 @@ import qualified FastString
 import Data.Interface.Module as Module
 import Data.Interface.Source as Source
 
-import Debug.Trace  -- TODO
-
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
 -- the given module targets.
@@ -101,13 +99,13 @@ typecheckedModuleInterface typMod = do
 -- rather than the imported module
 --  (e.g. Data.List.foldr will appear as Data.Foldable.foldr)
 nameToExport :: GHC.Module -> GHC.Name -> Ghc Module.Export
-nameToExport thisModule name = do
-    Just (thing, _fixity, _, _) <- getInfo False name
+nameToExport thisModule ghcName = do
+    Just (thing, _fixity, _, _) <- getInfo False ghcName
     -- TODO: ^ handle this properly: if `name` is not in the GHC
     --         environment, this will trigger an exception
 
     let sdecl = thingToSomeDecl thing
-        nameMod = nameModule name
+        nameMod = nameModule ghcName
     
     pure $ if nameMod /= thisModule
         then Reexport $ makeQual nameMod (someDeclName sdecl)
@@ -123,24 +121,27 @@ thingToSomeDecl :: GHC.TyThing -> Module.SomeDecl
 thingToSomeDecl thing = case thing of
     ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        mkDecl $ Value $ unsafeOutput (idType a)
+        mkValue $ Value $ unsafeOutput (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        mkDecl $ makeDataCon dcon
+        mkValue $ makeDataCon dcon
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        mkDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
+        mkValue $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            mkDecl $ TypeSyn kind $ unsafeOutput rhs
+            mkType $ TypeSyn kind $ unsafeOutput rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            mkDecl $ TypeClass kind
+            mkType $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            mkDecl $ Module.DataType kind
+            mkType $ Module.DataType kind
       where
         kind = map getOccString (tyConTyVars tyCon)
                     -- TODO: ^ include "result" kind
   where
-    mkDecl :: DeclInfo s -> SomeDecl
-    mkDecl = someDecl . nameToDecl (getName thing)
+    mkValue :: ValueDecl -> SomeDecl
+    mkValue = SomeValue . NamedValue . makeNamed (getName thing)
+
+    mkType :: TypeDecl -> SomeDecl
+    mkType = SomeType . NamedType . makeNamed (getName thing)
 
 --  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon
@@ -148,19 +149,21 @@ thingToSomeDecl thing = case thing of
         (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
 
 
-nameToDecl :: GHC.Name -> DeclInfo s -> Decl s
-nameToDecl name = makeDecl (getOccString name) (makeSource name)
+makeNamed :: GHC.Name -> a -> Named s a
+makeNamed ghcName = Named (Name (getOccString ghcName)) (makeOrigin ghcName)
 
 
-makeSource :: GHC.Name -> Maybe Source
-makeSource name = case nameSrcSpan name of
+makeOrigin :: GHC.Name -> Origin
+makeOrigin ghcName = case nameSrcSpan ghcName of
     RealSrcSpan ss ->
         let path = FastString.unpackFS $ srcSpanFile ss
             loc0 = SrcLoc.realSrcSpanStart ss
             loc1 = SrcLoc.realSrcSpanEnd ss
-        in Just $ Source path $ SrcSpan (mkLoc loc0) (mkLoc loc1)
-    us@UnhelpfulSpan{} ->
-        trace ("TRACE makeDecl: " ++ show us) Nothing   -- TODO
+        in KnownSource $ Source path $ SrcSpan (mkLoc loc0) (mkLoc loc1)
+    us@UnhelpfulSpan{}
+        | us == SrcLoc.wiredInSrcSpan -> WiredIn
+        | us == SrcLoc.noSrcSpan -> UnknownSource
+        | otherwise -> error $ "makeOrigin: " ++ show us
   where
     mkLoc :: GHC.RealSrcLoc -> Source.SrcLoc
     mkLoc loc = Source.SrcLoc (srcLocLine loc) (srcLocCol loc)

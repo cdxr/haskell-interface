@@ -43,8 +43,8 @@ import Data.Interface.Module.Decl
 data ModuleInterface = ModuleInterface
     { moduleName       :: !ModuleName
     -- locally-defined:
-    , moduleValues     :: !(Map ValueName ValueDecl)
-    , moduleTypes      :: !(Map TypeName TypeDecl)
+    , moduleValues     :: !(Map ValueName NamedValue)
+    , moduleTypes      :: !(Map TypeName NamedType)
     -- re-exported:
     , moduleReexports  :: !(Set (Qual SomeName))
     -- implicitly exported:
@@ -65,8 +65,8 @@ deriving instance Show ModuleInterface
 
 
 emptyModuleInterface :: ModuleName -> ModuleInterface
-emptyModuleInterface name = ModuleInterface
-    { moduleName      = name
+emptyModuleInterface modName = ModuleInterface
+    { moduleName      = modName
     , moduleValues    = Map.empty
     , moduleTypes     = Map.empty
     , moduleReexports = Set.empty
@@ -75,26 +75,26 @@ emptyModuleInterface name = ModuleInterface
 
 makeModuleInterface
     :: ModuleName -> [Export] -> [ClassInstance] -> ModuleInterface
-makeModuleInterface name exports instances =
+makeModuleInterface modName exports instances =
     foldr addExport newModIf exports
   where 
     newModIf :: ModuleInterface
     newModIf =
-        (emptyModuleInterface name)
+        (emptyModuleInterface modName)
             { moduleInstances = Set.fromList instances }
 
 
 addExport :: Export -> ModuleInterface -> ModuleInterface
 addExport e = case e of
     LocalExport decl -> addDecl decl
-    Reexport name -> addReexport name
+    Reexport qualName -> addReexport qualName
 
 
 addDecl :: SomeDecl -> ModuleInterface -> ModuleInterface
 addDecl sd modInt = case sd of
-    ValueDecl decl -> modInt
+    SomeValue decl -> modInt
         {moduleValues = Map.insert (declName decl) decl (moduleValues modInt)}
-    TypeDecl decl -> modInt
+    SomeType decl -> modInt
         {moduleTypes = Map.insert (declName decl) decl (moduleTypes modInt)}
 
 
@@ -131,7 +131,7 @@ data Export
 -- | All module exports
 moduleExports :: ModuleInterface -> [Export]
 moduleExports modIf = concat
-    [ map (LocalExport . ValueDecl) $ Map.elems $ moduleValues modIf
-    , map (LocalExport . TypeDecl)  $ Map.elems $ moduleTypes modIf
+    [ map (LocalExport . SomeValue) $ Map.elems $ moduleValues modIf
+    , map (LocalExport . SomeType)  $ Map.elems $ moduleTypes modIf
     , map Reexport $ Set.toList $ moduleReexports modIf
     ]
