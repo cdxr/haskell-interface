@@ -41,8 +41,11 @@ showsTypePrec p t0 = case t0 of
     AppType a b -> showParen (p > 10) $
         showsTypePrec 10 a . showChar ' ' . showsTypePrec 10 b
     FunType (a :-> b) -> showParen (p > 10) $
-        -- TODO case kind constraint
-        showsTypePrec 10 a . showString " -> " . showsTypePrec 10 b
+        showsTypePrec 10 a . showString infixString . showsTypePrec 10 b
+          where
+            infixString = case typeKind a of
+                ConstraintKind -> " => "
+                _              -> " -> "
     Forall vs t -> showString (unwords $ "forall" : map varName vs) .
                    showString ". " . showsTypePrec 0 t
 
