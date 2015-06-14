@@ -85,19 +85,18 @@ instance Format a => Format (Replace a) where
 instance Format (Name s) where
     format = rawName
 
-instance Format (NamedDecl s) where
-    format (NamedValue n) = format n
-    format (NamedType n) = format n
-
 instance Format ValueDecl where
     format = show
 
 instance Format TypeDecl where
     format = show
 
-instance (Format (Name s), Format a) => Format (Named s a) where
-    format (Named n o a) =
-        format n ++ " (origin: " ++ show o ++ ") " ++ format a
+instance (Format a) => Format (Named a) where
+    format n = unwords
+        [ show (rawName n)
+        , "(origin: " ++ show (origin n) ++ ")"
+        , format (namedThing n) 
+        ]
 
 instance Format ValueChange where
     format = show

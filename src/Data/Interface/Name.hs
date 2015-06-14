@@ -1,7 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module Data.Interface.Name where
 
@@ -101,20 +104,27 @@ instance (HasSomeName n) => HasSomeName (Qual n) where
     someName (Qual _ n) = someName n
 
 
+data Named a = Named !RawName !Origin a
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-data Named s a = Named
-    { name       :: !(Name s)
-    , origin     :: !Origin
-    , namedThing :: a
-    } deriving (Show, Eq, Ord, Functor)
+namedThing :: Named a -> a
+namedThing (Named _ _ a) = a
 
-instance HasRawName (Named s a) where
-    rawName (Named n _ _) = rawName n
+origin :: Named a -> Origin
+origin (Named _ o _) = o
 
-instance HasNamespace (Named 'Values a) where
-    type Space (Named 'Values a) = 'Just 'Values
-    namespace _ = Values
+instance HasRawName (Named a) where
+    rawName (Named n _ _) = n
 
-instance HasNamespace (Named 'Types a) where
-    type Space (Named 'Types a) = 'Just 'Types
-    namespace _ = Types
+instance HasNamespace a => HasNamespace (Named a) where
+    type Space (Named a) = Space a
+    namespace (Named _ _ a) = namespace a
+
+instance HasNamespace a => HasSomeName (Named a) where
+
+
+-- | If @n@ has a `RawName` and determines a namespace @s@, it has a @Name s@.
+type (HasName s n) = (HasRawName n, Space n ~ 'Just s)
+
+name :: (HasName s n) => n -> Name s
+name = Name . rawName

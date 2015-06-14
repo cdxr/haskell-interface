@@ -21,8 +21,8 @@ import Data.Interface.Change
 --
 data ModuleDiff = ModuleDiff
     { diffModuleName      :: !(DiffEq ModuleName)
-    , diffModuleValues    :: !(DiffMap ValueName ValueChange NamedValue)
-    , diffModuleTypes     :: !(DiffMap TypeName TypeChange NamedType)
+    , diffModuleValues    :: !(DiffMap RawName ValueChange (Named ValueDecl))
+    , diffModuleTypes     :: !(DiffMap RawName TypeChange (Named TypeDecl))
     , diffModuleReexports :: !(DiffSetEq (Qual SomeName))
     , diffModuleInstances :: !(DiffSetEq ClassInstance)
     }
@@ -40,8 +40,8 @@ diffModules a b = ModuleDiff
     }
 
 
-newtype ValueChange = ValueChange (Replace NamedValue)
-    deriving (Show, Eq, Ord, Change NamedValue)
+newtype ValueChange = ValueChange (Replace (Named ValueDecl))
+    deriving (Show, Eq, Ord, Change (Named ValueDecl))
 
-newtype TypeChange = TypeChange (Replace NamedType)
-    deriving (Show, Eq, Ord, Change NamedType)
+newtype TypeChange = TypeChange (Replace (Named TypeDecl))
+    deriving (Show, Eq, Ord, Change (Named TypeDecl))

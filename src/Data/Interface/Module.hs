@@ -43,8 +43,8 @@ import Data.Interface.Module.Decl
 data ModuleInterface = ModuleInterface
     { moduleName       :: !ModuleName
     -- locally-defined:
-    , moduleValues     :: !(Map ValueName NamedValue)
-    , moduleTypes      :: !(Map TypeName NamedType)
+    , moduleValues     :: !(Map RawName (Named ValueDecl))
+    , moduleTypes      :: !(Map RawName (Named TypeDecl))
     -- re-exported:
     , moduleReexports  :: !(Set (Qual SomeName))
     -- implicitly exported:
@@ -93,9 +93,9 @@ addExport e = case e of
 addDecl :: SomeDecl -> ModuleInterface -> ModuleInterface
 addDecl sd modInt = case sd of
     SomeValue decl -> modInt
-        {moduleValues = Map.insert (declName decl) decl (moduleValues modInt)}
+        {moduleValues = Map.insert (rawName decl) decl (moduleValues modInt)}
     SomeType decl -> modInt
-        {moduleTypes = Map.insert (declName decl) decl (moduleTypes modInt)}
+        {moduleTypes = Map.insert (rawName decl) decl (moduleTypes modInt)}
 
 
 addReexport :: Qual SomeName -> ModuleInterface -> ModuleInterface

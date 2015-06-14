@@ -138,10 +138,10 @@ thingToSomeDecl thing = case thing of
                     -- TODO: ^ include "result" kind
   where
     mkValue :: ValueDecl -> SomeDecl
-    mkValue = SomeValue . NamedValue . makeNamed (getName thing)
+    mkValue = SomeValue . makeNamed (getName thing)
 
     mkType :: TypeDecl -> SomeDecl
-    mkType = SomeType . NamedType . makeNamed (getName thing)
+    mkType = SomeType . makeNamed (getName thing)
 
 --  makeDataCon :: GHC.DataCon -> Module.DeclInfo 'Values
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon
@@ -149,8 +149,8 @@ thingToSomeDecl thing = case thing of
         (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
 
 
-makeNamed :: GHC.Name -> a -> Named s a
-makeNamed ghcName = Named (Name (getOccString ghcName)) (makeOrigin ghcName)
+makeNamed :: GHC.Name -> a -> Named a
+makeNamed ghcName = Named (getOccString ghcName) (makeOrigin ghcName)
 
 
 makeOrigin :: GHC.Name -> Origin

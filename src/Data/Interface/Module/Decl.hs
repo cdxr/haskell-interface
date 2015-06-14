@@ -1,20 +1,11 @@
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE GADTs #-}
 
 {-| Types for top-level declarations.
 -}
 module Data.Interface.Module.Decl
  (
-    NamedDecl(..)
-  , NamedValue
-  , NamedType
-  , declName
-  , declOrigin
-
-  , SomeDecl(..)
-  , someDecl
+    SomeDecl(..)
   , someDeclName
 
   , Type
@@ -26,7 +17,6 @@ module Data.Interface.Module.Decl
 where
 
 import Data.Interface.Name
-import Data.Interface.Source
 
 
 type Type = String      -- ^ TODO
@@ -65,37 +55,10 @@ instance HasNamespace TypeDecl where
 -}
 
 
-data NamedDecl s where
-    NamedValue :: Named 'Values ValueDecl -> NamedDecl 'Values
-    NamedType  :: Named 'Types TypeDecl -> NamedDecl 'Types
-
-declName :: NamedDecl s -> Name s
-declName (NamedValue n) = name n
-declName (NamedType n) = name n
-
-declOrigin :: NamedDecl s -> Origin
-declOrigin (NamedValue n) = origin n
-declOrigin (NamedType n) = origin n
-
-
-type NamedValue = NamedDecl 'Values
-type NamedType = NamedDecl 'Types
-
-
-deriving instance Show (NamedDecl s)
-deriving instance Eq   (NamedDecl s)
-deriving instance Ord  (NamedDecl s)
-
-
 data SomeDecl
-    = SomeValue !(NamedDecl 'Values)
-    | SomeType !(NamedDecl 'Types)
+    = SomeValue !(Named ValueDecl)
+    | SomeType  !(Named TypeDecl)
     deriving (Show, Eq, Ord)
-
-someDecl :: NamedDecl s -> SomeDecl
-someDecl decl = case decl of
-    NamedValue{} -> SomeValue decl
-    NamedType{}  -> SomeType decl
 
 someDeclName :: SomeDecl -> SomeName
 someDeclName sd = case sd of
@@ -103,11 +66,10 @@ someDeclName sd = case sd of
     SomeType decl  -> SomeName Types (rawName decl)
 
 
-instance HasNamespace (NamedDecl s) where
-    type Space (NamedDecl s) = 'Just s
-
-    namespace (NamedValue n) = namespace n
-    namespace (NamedType n) = namespace n
+instance HasRawName SomeDecl where
+    rawName sd = case sd of
+        SomeValue n -> rawName n
+        SomeType  n -> rawName n
 
 instance HasNamespace SomeDecl where
     type Space SomeDecl = 'Nothing
@@ -115,8 +77,4 @@ instance HasNamespace SomeDecl where
     namespace SomeValue{} = Values
     namespace SomeType{}  = Types
 
-instance HasRawName (NamedDecl s) where
-    rawName decl = case decl of
-        NamedValue n -> rawName n
-        NamedType n -> rawName n
-
+instance HasSomeName SomeDecl where
