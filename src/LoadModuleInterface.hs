@@ -19,9 +19,15 @@ import qualified Outputable as Out
 import qualified InstEnv
 import qualified SrcLoc
 import qualified FastString
+import qualified Var
+import qualified Type
+import qualified Kind
 
+import Data.Interface.Source as Module
+import Data.Interface.Type as Module
 import Data.Interface.Module as Module
-import Data.Interface.Source as Source
+
+import Debug.Trace
 
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
@@ -134,7 +140,7 @@ thingToSomeDecl thing = case thing of
         | otherwise ->                              -- data/newtype/other
             mkType $ Module.DataType kind
       where
-        kind = map getOccString (tyConTyVars tyCon)
+        kind = makeKind tyCon
                     -- TODO: ^ include "result" kind
   where
     mkValue :: ValueDecl -> SomeDecl
@@ -147,6 +153,31 @@ thingToSomeDecl thing = case thing of
     makeDataCon dcon = DataCon $ makeType $ dataConType dcon
       where
         (_tyVars, _thetaType, _types, _resultType) = dataConSig dcon
+
+
+makeKind :: GHC.TyCon -> Module.Kind
+makeKind tyCon = trace t $
+    go (map Type.typeKind . Type.mkTyVarTys $ tyConTyVars tyCon)
+       (synTyConResKind tyCon)
+  where
+    go :: [GHC.Kind] -> GHC.Kind -> Module.Kind
+    go [] res = mk res
+    go (a:args) res = ApplyKind $ mk a :-> go args res
+
+    -- TODO: promoted types
+    mk :: GHC.Kind -> Module.Kind
+    mk k | Kind.isLiftedTypeKind k   = StarKind
+         | Kind.isUnliftedTypeKind k = HashKind
+         | Kind.isConstraintKind k = ConstraintKind
+         | otherwise =
+             error $ "makeKind: unimplemented Kind: " ++ unsafeOutput k
+        
+    t = unwords
+            [ "TRACE makeKind:"
+            , getOccString tyCon
+            , show $ map (unsafeOutput . Var.varType) $ tyConTyVars tyCon
+            , unsafeOutput $ synTyConResKind tyCon
+            ]
 
 
 makeNamed :: GHC.Name -> a -> Named a
@@ -165,8 +196,8 @@ makeOrigin ghcName = case nameSrcSpan ghcName of
         | us == SrcLoc.noSrcSpan -> UnknownSource
         | otherwise -> error $ "makeOrigin: " ++ show us
   where
-    mkLoc :: GHC.RealSrcLoc -> Source.SrcLoc
-    mkLoc loc = Source.SrcLoc (srcLocLine loc) (srcLocCol loc)
+    mkLoc :: GHC.RealSrcLoc -> Module.SrcLoc
+    mkLoc loc = Module.SrcLoc (srcLocLine loc) (srcLocCol loc)
 
 
 -- Note: `Type` and `Kind` are currently implemented as lists of Strings
@@ -195,6 +226,7 @@ withGhc :: Ghc a -> IO a
 withGhc ghcAction =
     runGhc (Just GHC.Paths.libdir) $ do
         -- prepare package state, ignoring output (no need for linking)
-        _ <- setSessionDynFlags =<< getSessionDynFlags
+        dynFlags <- getSessionDynFlags
+        _ <- setSessionDynFlags dynFlags
 
-        ghcAction
+        defaultCleanupHandler dynFlags ghcAction

@@ -20,6 +20,7 @@ import Data.Interface.Module
 import Data.Interface.ModuleDiff
 import Data.Interface.Change
 import Data.Interface.Source
+import Data.Interface.Type
 
 
 main :: IO ()
@@ -97,7 +98,14 @@ instance Format ValueDecl where
     format = show
 
 instance Format TypeDecl where
-    format = show
+    format td = case td of
+        DataType k ->
+            "DataType (" ++ showKind k ++ ")"
+        TypeSyn k def ->
+            "TypeSyn (" ++ showKind k ++ ")" ++ def
+        TypeClass k ->
+            "TypeClass (" ++ showKind k ++ ")"
+
 
 instance (Format a) => Format (Named a) where
     format n = unwords
@@ -144,7 +152,8 @@ reportChanges mdiff = do
 reportSummary :: (Format c, Format a) => String -> DiffSummary c a -> Report ()
 reportSummary title summary = do
     output ANSI.White $ unlines
-        [ "*** " ++ title ++ " ***"
+        [ ""
+        , "*** " ++ title ++ " ***"
         , show (length $ unchanged summary) ++ " unchanged"
         , show (length $ changed summary) ++ " changed"
         , show (length $ added summary) ++ " added"

@@ -1,5 +1,6 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds #-}
 
 {-  This module is test input for working with the ModuleInterface type.
  -  The goal is to eventually provide a small simple example of every sort
@@ -23,6 +24,10 @@ module Test
   , LocalClass(..)          -- locally-defined typeclass
 
   , LocalTypeFamily         -- locally-defined type family
+
+  , PromotedType(..)
+  , HasPromoted(..)
+  , hasPromoted
 
 -- * Re-exports
   , Bool                    -- re-export type
@@ -81,3 +86,11 @@ instance LocalClass Int where
 type family LocalTypeFamily a :: *
 type instance LocalTypeFamily FooTypeCon = Bool
 type instance LocalTypeFamily Bool = Ordering
+
+
+data PromotedType = PromotedData
+
+data HasPromoted (pt :: PromotedType) = HasPromoted
+
+hasPromoted :: HasPromoted 'PromotedData
+hasPromoted = HasPromoted

@@ -17,6 +17,7 @@ library
     LoadModuleInterface
     Data.Interface.Name
     Data.Interface.Source
+    Data.Interface.Type
     Data.Interface.Module
     Data.Interface.Module.Decl
     Data.Interface.ModuleDiff

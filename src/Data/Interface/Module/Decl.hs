@@ -17,9 +17,8 @@ module Data.Interface.Module.Decl
 where
 
 import Data.Interface.Name
+import Data.Interface.Type
 
-
-type Type = String      -- ^ TODO
 
 data ValueDecl
     = Value String
@@ -31,8 +30,6 @@ instance HasNamespace ValueDecl where
     type Space ValueDecl = 'Just 'Values
     namespace _ = Values
 
-
-type Kind = [String]    -- ^ TODO
 
 data TypeDecl
     = DataType Kind
