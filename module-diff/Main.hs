@@ -19,6 +19,7 @@ import LoadModuleInterface   ( readModuleInterfaces )
 import Data.Interface.Module
 import Data.Interface.ModuleDiff
 import Data.Interface.Change
+import Data.Interface.Source
 
 
 main :: IO ()
@@ -82,6 +83,13 @@ class Format a where
 instance Format a => Format (Replace a) where
     format (Replace a b) = "   " ++ format a ++ "\n => " ++ format b
 
+instance Format ValueChange where
+    format (ValueChange r) = format r
+
+instance Format TypeChange where
+    format (TypeChange r) = format r
+
+
 instance Format (Name s) where
     format = rawName
 
@@ -94,16 +102,19 @@ instance Format TypeDecl where
 instance (Format a) => Format (Named a) where
     format n = unwords
         [ show (rawName n)
-        , "(origin: " ++ show (origin n) ++ ")"
+        , format (origin n)
         , format (namedThing n) 
         ]
 
-instance Format ValueChange where
-    format = show
-
-instance Format TypeChange where
-    format = show
-
+instance Format Origin where
+    format o = case o of
+        WiredIn       -> "[B]"
+        UnknownSource -> "[?]"
+        KnownSource (Source path (SrcSpan loc0 loc1)) ->
+            '[' : path ++ ':' : showLoc loc0 ++ '-' : showLoc loc1 ++ "]"
+      where
+        showLoc (SrcLoc l c) = show l ++ ":" ++ show c
+        
 instance Format (Qual SomeName) where
     format qual = formatQualName qual ++ case namespace qual of
         Values -> " (value)"
