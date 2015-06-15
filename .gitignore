@@ -1,4 +1,6 @@
 dist/
-test/modules/*.hi
-test/modules/*.o
+test/modules/original/*.hi
+test/modules/original/*.o
+test/modules/tagged/*/Data/*.hi
+test/modules/tagged/*/Data/*.o
 .*.swp

@@ -28,9 +28,9 @@ main = do
 
 prepareModuleDiff :: ProgramArgs -> IO ModuleDiff
 prepareModuleDiff args =
-    diffModules <$> loadModule target0 <*> loadModule target1
+    diffModules <$> loadModule mod0 <*> loadModule mod1
   where
-    (target0, target1) = targetModules args
+    Target mod0 mod1 = programTarget args
 
     loadModule :: String -> IO ModuleInterface
     loadModule target = do
