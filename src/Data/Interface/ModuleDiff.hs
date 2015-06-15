@@ -40,8 +40,21 @@ diffModules a b = ModuleDiff
     }
 
 
+-- TODO: the definitions of ValueChange and TypeChange are temporary
+
 newtype ValueChange = ValueChange (Replace (Named ValueDecl))
-    deriving (Show, Eq, Ord, Change (Named ValueDecl))
+    deriving (Show, Eq, Ord)
+
+instance Change (Named ValueDecl) ValueChange where
+    change a b
+        | namedThing a == namedThing b = Just $ ValueChange $ Replace a b
+        | otherwise = Nothing
+
 
 newtype TypeChange = TypeChange (Replace (Named TypeDecl))
-    deriving (Show, Eq, Ord, Change (Named TypeDecl))
+    deriving (Show, Eq, Ord)
+
+instance Change (Named TypeDecl) TypeChange where
+    change a b
+        | namedThing a == namedThing b = Just $ TypeChange $ Replace a b
+        | otherwise = Nothing
