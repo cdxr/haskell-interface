@@ -1,8 +1,4 @@
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Main where
 
@@ -10,17 +6,15 @@ import Control.Monad
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 
-import System.FilePath ( (</>) )
 import qualified System.Environment
 
 import qualified System.Console.ANSI as ANSI
 
 import LoadModuleInterface   ( readModuleInterfaces )
-import Data.Interface.Module
-import Data.Interface.ModuleDiff
-import Data.Interface.Change
-import Data.Interface.Source
-import Data.Interface.Type
+import Data.Interface
+
+import ProgramArgs
+import Format
 
 
 main :: IO ()
@@ -77,71 +71,6 @@ output color s = Report . lift $ putStrLn $ setColor color ++ s
     setColor c = ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
 
 
-
-class Format a where
-    format :: a -> String
-
-instance Format a => Format (Replace a) where
-    format (Replace a b) = "   " ++ format a ++ "\n => " ++ format b
-
-instance Format ValueChange where
-    format (ValueChange r) = format r
-
-instance Format TypeChange where
-    format (TypeChange r) = format r
-
-
-instance Format (Name s) where
-    format = rawName
-
-instance Format Type where
-    format t = "(" ++ showType t ++ ") " ++ show t
-
-instance Format Kind where
-    format k = "(" ++ showKind k ++ ") " ++ show k
-
-instance Format ValueDecl where
-    format vd = con ++ " " ++ format (typeOf vd)
-      where
-        con = case vd of
-                Value{}      -> "Value"
-                PatternSyn{} -> "PatternSyn"
-                DataCon{}    -> "DataCon"
-
-instance Format TypeDecl where
-    format td = con ++ " " ++ format (kindOf td)
-      where
-        con = case td of
-            DataType{}  -> "DataType"
-            TypeSyn{}   -> "TypeSyn"
-            TypeClass{} -> "TypeClass"
-
-
-instance (Format a) => Format (Named a) where
-    format n = unwords
-        [ show (rawName n)
-        , format (origin n)
-        , format (namedThing n) 
-        ]
-
-instance Format Origin where
-    format o = case o of
-        WiredIn       -> "[B]"
-        UnknownSource -> "[?]"
-        KnownSource (Source path (SrcSpan loc0 loc1)) ->
-            '[' : path ++ ':' : showLoc loc0 ++ '-' : showLoc loc1 ++ "]"
-      where
-        showLoc (SrcLoc l c) = show l ++ ":" ++ show c
-        
-instance Format (Qual SomeName) where
-    format qual = formatQualName qual ++ case namespace qual of
-        Values -> " (value)"
-        Types -> " (type)"
-
-instance Format ClassInstance where
-    format = show
-
-
 reportChanges :: ModuleDiff -> Report ()
 reportChanges mdiff = do
     onDiff (diffModuleName mdiff) $ \(Replace a b) ->
@@ -191,30 +120,3 @@ reportElemChange e = case e of
     Removed a -> output ANSI.Red   $ "-  " ++ format a
     Added a   -> output ANSI.Green $ "+  " ++ format a
     Changed c -> output ANSI.Blue  $ "   " ++ format c
-
-
-
--- * Program arguments
-
-data ProgramArgs = ProgramArgs
-    { targetModules  :: (FilePath, FilePath)
-    , dumpInterfaces :: Bool
-    }
-
-defaultArgs :: ProgramArgs
-defaultArgs = ProgramArgs
-    { targetModules =
-        (moduleDir </> "Test.hs", moduleDir </> "TestChangeAll.hs")
-    , dumpInterfaces = False
-    }
-  where
-    moduleDir = "test" </> "modules"
-
-
--- TODO implement this for real
-parseArgs :: [String] -> ProgramArgs
-parseArgs = foldr f defaultArgs
-  where
-    f a args = case a of
-        "--dump" -> args { dumpInterfaces = True }
-        _        -> error $ "bad program argument: " ++ a

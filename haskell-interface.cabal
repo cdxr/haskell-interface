@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:
     LoadModuleInterface
+    Data.Interface
     Data.Interface.Name
     Data.Interface.Source
     Data.Interface.Type
