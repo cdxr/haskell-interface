@@ -3,7 +3,6 @@
 `module-diff/Main.hs`
  - You can run this console program with `cabal run`
  - It prints data produced by the library
- - For now, it only operates on built-in targets
  - See `test/modules/README.md` for descriptions of the built-in targets
 
 `Data.Interface.Module`

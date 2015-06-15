@@ -46,4 +46,6 @@ parseArgs args0 = go args0 defaultArgs
                 go as $ pa0 { programTarget = t }
             | otherwise ->
                 error $ "not a built-in target: " ++ targetName
+        [target0, target1] ->
+            pa0 { programTarget = Target target0 target1 }
         _ -> error $ "bad program args: " ++ unwords args
