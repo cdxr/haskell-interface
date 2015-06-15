@@ -6,6 +6,8 @@ import Control.Monad
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 
+import Data.Foldable ( toList )
+
 import qualified System.Environment
 
 import qualified System.Console.ANSI as ANSI
@@ -43,17 +45,18 @@ dumpModuleInterface modIf = do
     putStr $ unlines
         [ ""
         , "*** Dumping ModuleInterface ***"
-        , "moduleName: " ++ moduleName modIf
+        , "Name: " ++ moduleName modIf
         ]
-    printAll "moduleValues:"    $ moduleValues modIf
-    printAll "moduleTypes:"     $ moduleTypes modIf
-    printAll "moduleReexports:" $ moduleReexports modIf
-    printAll "moduleInstances:" $ moduleInstances modIf
+
+    mapM_ (printFormatTree 2)
+        [ makeNode "Values:"     $ moduleValues modIf
+        , makeNode "Types:"      $ moduleTypes modIf
+        , makeNode "Re-exports:" $ moduleReexports modIf
+        , makeNode "Instances:"  $ moduleInstances modIf
+        ]
   where
-    printAll lbl es = do
-        putStrLn lbl
-        forM_ es $ putStrIndent 2 . format
-    putStrIndent i s = putStrLn $ replicate i ' ' ++ s
+    makeNode :: (Foldable f, Format a) => String -> f a -> FormatTree
+    makeNode lbl = formatNode lbl . map format . toList
 
 
 newtype Report a = Report (ReaderT ProgramArgs IO a)
@@ -69,6 +72,10 @@ output color s = Report . lift $ putStrLn $ setColor color ++ s
   where
     setColor :: ANSI.Color -> String
     setColor c = ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
+
+
+outputTree :: FormatTree -> Report ()
+outputTree = Report . lift . printFormatTree 2
 
 
 reportChanges :: ModuleDiff -> Report ()
@@ -109,14 +116,4 @@ reportSummary title summary = do
         String -> ANSI.Color -> f a -> Report ()
     outputAll category color es = do
         output color $ "* " ++ title ++ " (" ++ category ++ ")"
-        forM_ es $ output ANSI.White . indent 2 . format
-
-    indent n s = replicate n ' ' ++ s
-
-
-
-reportElemChange :: (Format c, Format a) => Elem c a -> Report ()
-reportElemChange e = case e of
-    Removed a -> output ANSI.Red   $ "-  " ++ format a
-    Added a   -> output ANSI.Green $ "+  " ++ format a
-    Changed c -> output ANSI.Blue  $ "   " ++ format c
+        forM_ es $ outputTree . format

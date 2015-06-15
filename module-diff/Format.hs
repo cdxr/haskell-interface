@@ -2,14 +2,42 @@
 
 module Format where
 
+import Control.Monad
+import Data.Tree
+
 import Data.Interface
 
 
+type FormatTree = Tree String
+
+formatNode :: String -> [FormatTree] -> FormatTree
+formatNode = Node
+
+printFormatTree :: Int -> FormatTree -> IO ()
+printFormatTree indentSize = go 0
+  where
+    indent n s = replicate n ' ' ++ s
+    go depth (Node s ts) = do
+        putStrLn $ indent (depth * indentSize) s
+        forM_ ts $ go (depth + 1)
+
+prepend :: String -> FormatTree -> FormatTree
+prepend s (Node a ts) = Node (s ++ a) ts
+
+
 class Format a where
-    format :: a -> String
+    format :: a -> Tree String
+
+subFormat :: Format a => a -> Forest String
+subFormat = subForest . format
+
 
 instance Format a => Format (Replace a) where
-    format (Replace a b) = "   " ++ format a ++ "\n => " ++ format b
+    format (Replace a b) =
+        Node "Replace"
+            [ prepend "from: " (format a)
+            , prepend "to:   " (format b)
+            ]
 
 instance Format ValueChange where
     format (ValueChange r) = format r
@@ -19,40 +47,50 @@ instance Format TypeChange where
 
 
 instance Format (Name s) where
-    format = rawName
+    format = pure . rawName
 
 instance Format Type where
-    format t = "(" ++ showType t ++ ") " ++ show t
+    format t =
+        Node "[Type]"
+            [ pure $ "show: " ++ show t
+            , pure $ "render: " ++ showType t
+            ]
 
 instance Format Kind where
-    format k = "(" ++ showKind k ++ ") " ++ show k
+    format k = 
+        Node "[Kind]"
+            [ pure $ "show: " ++ show k
+            , pure $ "render: " ++ showKind k
+            ]
 
 instance Format ValueDecl where
-    format vd = con ++ " " ++ format (typeOf vd)
+    format vd =
+        Node lbl $ subFormat (typeOf vd)
       where
-        con = case vd of
+        lbl = case vd of
                 Value{}      -> "Value"
                 PatternSyn{} -> "PatternSyn"
                 DataCon{}    -> "DataCon"
 
 instance Format TypeDecl where
-    format td = con ++ " " ++ format (kindOf td)
+    format td = 
+        Node lbl $ subFormat (kindOf td)
       where
-        con = case td of
+        lbl = case td of
             DataType{}  -> "DataType"
             TypeSyn{}   -> "TypeSyn"
             TypeClass{} -> "TypeClass"
 
 
 instance (Format a) => Format (Named a) where
-    format n = unwords
-        [ show (rawName n)
-        , format (origin n)
-        , format (namedThing n) 
-        ]
+    format n =
+        Node (rawName n)
+            [ format (origin n)
+            , format (namedThing n) 
+            ]
 
 instance Format Origin where
-    format o = case o of
+    format o = pure $ case o of
         WiredIn       -> "[B]"
         UnknownSource -> "[?]"
         KnownSource (Source path (SrcSpan loc0 loc1)) ->
@@ -61,9 +99,9 @@ instance Format Origin where
         showLoc (SrcLoc l c) = show l ++ ":" ++ show c
         
 instance Format (Qual SomeName) where
-    format qual = formatQualName qual ++ case namespace qual of
+    format qual = pure $ formatQualName qual ++ case namespace qual of
         Values -> " (value)"
         Types -> " (type)"
 
 instance Format ClassInstance where
-    format = show
+    format = pure . show

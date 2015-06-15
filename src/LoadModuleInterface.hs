@@ -190,7 +190,7 @@ makeKind k
         error $ "makeKind: unimplemented Kind: " ++ unsafeOutput k
 
 tyconKind :: GHC.TyCon -> Module.Kind
-tyconKind tyCon = trace t $
+tyconKind tyCon =   -- trace t $
     go (map Type.typeKind . Type.mkTyVarTys $ tyConTyVars tyCon)
        (synTyConResKind tyCon)
   where
