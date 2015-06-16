@@ -180,14 +180,15 @@ makeType t0 = case splitForAllTys t0 of
 
 -- TODO: promoted types
 makeKind :: GHC.Kind -> Module.Kind
-makeKind k
-    | Just (ka, kb) <- Type.splitFunTy_maybe k =
-        FunKind $ makeKind ka :-> makeKind kb
-    | Kind.isLiftedTypeKind k   = StarKind
-    | Kind.isUnliftedTypeKind k = HashKind
-    | Kind.isConstraintKind k   = ConstraintKind
-    | otherwise =
-        error $ "makeKind: unimplemented Kind: " ++ unsafeOutput k
+makeKind k0 = case splitForAllTys k0 of
+    (_, k)   -- ignore forall, for now
+        | Just (ka, kb) <- Type.splitFunTy_maybe k ->
+            FunKind $ makeKind ka :-> makeKind kb
+        | Kind.isLiftedTypeKind k   -> StarKind
+        | Kind.isUnliftedTypeKind k -> HashKind
+        | Kind.isConstraintKind k   -> ConstraintKind
+        | Kind.isSuperKind k        -> SuperKind
+        | otherwise                 -> KindVar $ unsafeOutput k
 
 tyconKind :: GHC.TyCon -> Module.Kind
 tyconKind tyCon =   -- trace t $

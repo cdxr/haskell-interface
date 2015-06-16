@@ -3,6 +3,8 @@
 
 module Data.Interface.Type where
 
+import Debug.Trace
+
 
 data a :-> b = a :-> b
     deriving (Show, Read, Eq, Ord, Functor)
@@ -30,7 +32,12 @@ typeKind :: Type -> Kind
 typeKind t0 = case t0 of
     Type _ k -> k
     Var v -> varKind v
-    AppType f _ -> resultKind $ typeKind f
+    AppType f _ ->
+        let k0 = typeKind f
+            t = "TRACE typeKind: not FunKind: " ++ show k0
+        in case resultKind k0 of
+            Nothing -> trace t k0
+            Just k -> k
     FunType (a :-> b) -> StarKind
     Forall _ t -> typeKind t
 
@@ -67,9 +74,11 @@ promote t
 
 
 data Kind
-    = StarKind                    -- ^ Lifted types (*)
+    = KindVar String
+    | StarKind                    -- ^ Lifted types (*)
     | HashKind                    -- ^ Unlifted types (#)
-    | ConstraintKind              -- ^ Constraints (Constraint)
+    | SuperKind                   -- ^ the type of kinds (BOX)
+    | ConstraintKind              -- ^ Constraints
     | PromotedType Type           -- ^ promoted type using DataKinds
     | FunKind (Kind :-> Kind)
     deriving (Show, Eq, Ord)
@@ -79,16 +88,18 @@ data Kind
 -}
 
 -- | Determine the result of a `FunKind`. This is a partial function.
-resultKind :: Kind -> Kind
+resultKind :: Kind -> Maybe Kind
 resultKind k0 = case k0 of
-    FunKind (_ :-> k) -> k
-    _ -> error "resultKind: not a FunKind"
+    FunKind (_ :-> k) -> Just k
+    _ -> Nothing
 
 
 showsKind :: Kind -> ShowS
 showsKind k = case k of
+    KindVar s -> showString s
     StarKind -> showChar '*'
     HashKind -> showChar '#'
+    SuperKind -> showString "BOX"
     ConstraintKind -> showString "Constraint"
     PromotedType t -> showString "[showsKind: ERROR PromotedType TODO]"
     FunKind (ka :-> kr) -> showsKind ka . showString " -> " . showsKind kr
