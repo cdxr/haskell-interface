@@ -21,7 +21,7 @@ import Format
 
 main :: IO ()
 main = do
-    args <- parseArgs <$> System.Environment.getArgs
+    args <- parseProgramArgs
     mdiff <- prepareModuleDiff args
     runReport (reportChanges mdiff) args
 

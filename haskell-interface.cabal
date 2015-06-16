@@ -42,7 +42,8 @@ executable module-diff
     transformers,
     containers,
     filepath,
-    ansi-terminal >=0.6
+    ansi-terminal >=0.6,
+    optparse-applicative >=0.11 && <0.12
   hs-source-dirs: module-diff
   main-is: Main.hs
   default-language:    Haskell2010

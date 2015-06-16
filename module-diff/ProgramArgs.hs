@@ -1,28 +1,68 @@
-module ProgramArgs where
+module ProgramArgs
+(
+    parseProgramArgs
+  , ProgramArgs(..)
+  , Target(..)
+)
+where
 
 import System.FilePath ( (</>) )
 
+import Options.Applicative
+
+
+parseProgramArgs :: IO ProgramArgs
+parseProgramArgs =
+    execParser $
+        info (helper <*> mainParser)
+             (fullDesc <> header "compare module interfaces")
+
 
 data ProgramArgs = ProgramArgs
-    { programTarget  :: Target
-    , dumpInterfaces :: Bool
-    }
-
-defaultArgs :: ProgramArgs
-defaultArgs = ProgramArgs
-    { programTarget = snd . head $ availableTargets
-    , dumpInterfaces = False
-    }
-  where
-    moduleDir = "test" </> "modules"
-
+    { dumpInterfaces :: Bool
+    , programTarget  :: Target
+    } deriving (Show, Eq, Ord)
 
 data Target = Target FilePath FilePath
     deriving (Show, Eq, Ord)
 
+
+mainParser :: Parser ProgramArgs
+mainParser = ProgramArgs
+    <$> switch
+        ( long "dump"
+       <> short 'd'
+       <> help "Print all loaded module interfaces." )
+    <*> (builtinTarget <|> target)
+
+
+target :: Parser Target
+target = Target
+    <$> argument str (metavar "TARGET")
+    <*> argument str (metavar "TARGET")
+
+
+readBuiltinTarget :: ReadM Target
+readBuiltinTarget = str >>= \s -> case lookupBuiltinTarget s of
+    Nothing -> readerError $ "not a built-in target: " ++ s
+    Just t -> return t
+
+builtinTarget :: Parser Target
+builtinTarget =
+    option readBuiltinTarget $
+        long "built-in" <>
+        short 'b' <>
+        metavar "ID" <>
+        help "Run a built-in target (development feature)"
+
+
+lookupBuiltinTarget :: String -> Maybe Target
+lookupBuiltinTarget s = lookup s builtinTargets
+
+
 -- | Targets that are built into the program
-availableTargets :: [(String, Target)]
-availableTargets =
+builtinTargets :: [(String, Target)]
+builtinTargets =
     [ makeTarget "test" "original" ("Test.hs", "TestChangeAll.hs")
     , makeTarget "tagged" "tagged" $
         let path = "Data" </> "Tagged.hs"
@@ -32,20 +72,3 @@ availableTargets =
     makeTarget name dir (a, b) =
         let dir' = "test" </> "modules" </> dir
         in (name, Target (dir' </> a) (dir' </> b))
-
-
-parseArgs :: [String] -> ProgramArgs
-parseArgs args0 = go args0 defaultArgs
-  where
-    go args pa0 = case args of
-        [] -> pa0
-        "--dump":as ->
-            go as $ pa0 { dumpInterfaces = True }
-        "--target" : targetName : as
-            | Just t <- lookup targetName availableTargets ->
-                go as $ pa0 { programTarget = t }
-            | otherwise ->
-                error $ "not a built-in target: " ++ targetName
-        [target0, target1] ->
-            pa0 { programTarget = Target target0 target1 }
-        _ -> error $ "bad program args: " ++ unwords args
