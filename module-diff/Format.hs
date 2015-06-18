@@ -66,16 +66,17 @@ instance Format Kind where
 
 instance Format ValueDecl where
     format vd =
-        Node lbl $ subFormat (typeOf vd)
+        Node lbl [format $ typeOf vd]
       where
         lbl = case vd of
                 Value{}      -> "Value"
                 PatternSyn{} -> "PatternSyn"
-                DataCon{}    -> "DataCon"
+                DataCon _ fs -> "DataCon " ++ show (map rawName fs)
+
 
 instance Format TypeDecl where
     format td = 
-        Node lbl $ subFormat (kindOf td)
+        Node lbl [format $ kindOf td]
       where
         lbl = case td of
             DataType{}  -> "DataType"

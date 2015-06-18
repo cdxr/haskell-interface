@@ -37,17 +37,11 @@ varKind (TypeVar _ k) = k
 data TypeCon = TypeCon TypeConInfo Kind
     deriving (Show, Eq, Ord)
 
--- | The introducer and content of a type constructor
+-- | The introducer of a type constructor
 data TypeConInfo
-    = ConAlgebraic DataConList  -- ^ data/newtype declaration
-    | ConSynonym                -- ^ type synonym
-    | ConClass                  -- ^ class declaration
-    deriving (Show, Eq, Ord)
-
-
--- | Data constructors for an algebraic type, or `Abstract` when the data
--- constructors are hidden.
-data DataConList = Abstract | DataConList [Named ()]
+    = ConAlgebraic   -- ^ data/newtype declaration
+    | ConSynonym     -- ^ type synonym
+    | ConClass       -- ^ class declaration
     deriving (Show, Eq, Ord)
 
 

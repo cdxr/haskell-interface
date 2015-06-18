@@ -11,10 +11,12 @@ module Data.Interface.Module.Decl
   , Type
   , ValueDecl(..)
   , typeOf
+  , DataField
 
   , Kind
   , TypeDecl(..)
   , kindOf
+  , DataConList(..)
  )
 where
 
@@ -25,14 +27,16 @@ import Data.Interface.Type
 data ValueDecl
     = Value Type
     | PatternSyn Type
-    | DataCon Type
+    | DataCon Type [DataField]
     deriving (Show, Eq, Ord)
+
+type DataField = Named ()
 
 typeOf :: ValueDecl -> Type
 typeOf vd = case vd of
     Value t -> t
     PatternSyn t -> t
-    DataCon t -> t
+    DataCon t _ -> t
 
 instance HasNamespace ValueDecl where
     type Space ValueDecl = 'Just 'Values
@@ -40,30 +44,34 @@ instance HasNamespace ValueDecl where
 
 
 data TypeDecl
-    = DataType Kind
+    = DataType Kind DataConList
     | TypeSyn Kind String
     | TypeClass Kind
     deriving (Show, Eq, Ord)
-
-kindOf :: TypeDecl -> Kind
-kindOf td = case td of
-    DataType k -> k
-    TypeSyn k _ -> k
-    TypeClass k -> k
-
-instance HasNamespace TypeDecl where
-    type Space TypeDecl = 'Just 'Types
-    namespace _ = Types
 
 {- TypeDecl notes:
       - TypeSyn contains its definition
             (this is only a String for now, but will have to include
              first-class type information)
-      - Type constructors will need a list of their data constructors
-
       TODO:
         - type/data families
 -}
+
+kindOf :: TypeDecl -> Kind
+kindOf td = case td of
+    DataType k _ -> k
+    TypeSyn k _  -> k
+    TypeClass k  -> k
+
+instance HasNamespace TypeDecl where
+    type Space TypeDecl = 'Just 'Types
+    namespace _ = Types
+
+
+-- | Data constructors for an algebraic type, or `Abstract` when the data
+-- constructors are hidden.
+data DataConList = Abstract | DataConList [Named ()]
+    deriving (Show, Eq, Ord)
 
 
 data SomeDecl

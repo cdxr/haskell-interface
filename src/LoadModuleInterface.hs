@@ -126,7 +126,8 @@ thingToSomeDecl thing = case thing of
     AnId a ->                                       -- value
         mkValueDecl $ Value $ makeType (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        mkValueDecl $ DataCon $ makeType $ dataConType dcon
+        mkValueDecl $ makeDataCon dcon
+            -- DataCon (makeType $ dataConType dcon) (makeDataConList dcon)
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
         mkValueDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
     ATyCon tyCon
@@ -135,7 +136,7 @@ thingToSomeDecl thing = case thing of
         | isClassTyCon tyCon ->                     -- class definitions
             mkTypeDecl $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            mkTypeDecl $ Interface.DataType kind
+            mkTypeDecl $ Interface.DataType kind (makeDataConList tyCon)
       where
         kind = makeKind $ TyCon.tyConKind tyCon
   where
@@ -146,6 +147,14 @@ thingToSomeDecl thing = case thing of
     mkTypeDecl = SomeType . makeNamed thing
 
 
+makeDataCon :: GHC.DataCon -> ValueDecl
+makeDataCon dcon = DataCon (makeType ghcType) fields
+  where
+    ghcType = dataConType dcon
+    fields = map mkField (dataConFieldLabels dcon)
+    mkField lbl = makeNamed lbl ()
+
+
 -- TODO: type family instances
 makeTypeCon :: GHC.TyCon -> Interface.TypeCon
 makeTypeCon tc
@@ -153,7 +162,7 @@ makeTypeCon tc
         typeCon ConClass
         --Dict [makeClass cls]
     | TyCon.isAlgTyCon tc   =
-        typeCon $ ConAlgebraic dataConList
+        typeCon ConAlgebraic
     | TyCon.isTypeSynonymTyCon tc =
         typeCon ConSynonym
     | TyCon.isFamInstTyCon tc =
@@ -168,12 +177,14 @@ makeTypeCon tc
     typeCon info = TypeCon info kind
     kind = makeKind $ TyCon.tyConKind tc
 
-    dataConList :: DataConList
-    dataConList | TyCon.isAbstractTyCon tc = Abstract
-                | otherwise = DataConList $ map makeDataCon $ tyConDataCons tc
 
-    makeDataCon :: GHC.DataCon -> Named ()
-    makeDataCon dc = makeNamed dc ()
+makeDataConList :: GHC.TyCon -> DataConList
+makeDataConList tc
+    | TyCon.isAbstractTyCon tc = Abstract
+    | otherwise = DataConList $ map mkDataCon (tyConDataCons tc)
+  where
+    mkDataCon :: GHC.DataCon -> Named ()
+    mkDataCon dc = makeNamed dc ()
 
 
 -- TODO: numeric and string literals
