@@ -19,6 +19,9 @@ library
     Data.Interface.Name
     Data.Interface.Source
     Data.Interface.Type
+    Data.Interface.Type.Type
+    Data.Interface.Type.Env
+    Data.Interface.Type.Pretty
     Data.Interface.Module
     Data.Interface.Module.Decl
     Data.Interface.ModuleDiff

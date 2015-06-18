@@ -8,8 +8,6 @@ import Control.Monad.Trans.Class
 
 import Data.Foldable ( toList )
 
-import qualified System.Environment
-
 import qualified System.Console.ANSI as ANSI
 
 import LoadModuleInterface   ( readModuleInterfaces )

@@ -1,109 +1,60 @@
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DeriveFunctor #-}
+module Data.Interface.Type
+(
+    module Data.Interface.Type.Type
+  , module Data.Interface.Type.Env
+  , module Data.Interface.Type.Pretty
+)
+where
 
-module Data.Interface.Type where
+import Data.Interface.Name
 
-import Debug.Trace
-
-
-data a :-> b = a :-> b
-    deriving (Show, Read, Eq, Ord, Functor)
+import Data.Interface.Type.Type
+import Data.Interface.Type.Env
+import Data.Interface.Type.Pretty
 
 
-data TypeVar = TypeVar String Kind
+-- | A single step of a Type traversal
+data TypeStep
+    = StepApply StepDir
+    | StepFun StepDir
+    | StepForall
     deriving (Show, Eq, Ord)
 
-varName :: TypeVar -> String
-varName (TypeVar n _) = n
-
-varKind :: TypeVar -> Kind
-varKind (TypeVar _ k) = k
-
-
-data Type
-    = Type String Kind
-    | Var TypeVar
-    | AppType Type Type
-    | FunType (Type :-> Type)
-    | Forall [TypeVar] Type
+data StepDir = StepLeft | StepRight
     deriving (Show, Eq, Ord)
 
-typeKind :: Type -> Kind
-typeKind t0 = case t0 of
-    Type _ k -> k
-    Var v -> varKind v
-    AppType f _ ->
-        let k0 = typeKind f
-            t = "TRACE typeKind: not FunKind: " ++ show k0
-        in case resultKind k0 of
-            Nothing -> trace t k0
-            Just k -> k
-    FunType (a :-> b) -> StarKind
-    Forall _ t -> typeKind t
 
-showsTypePrec :: Int -> Type -> ShowS
-showsTypePrec p t0 = case t0 of
-    Type s _ -> showString s
-    Var v -> showString (varName v)
-    AppType a b -> showParen (p > 10) $
-        showsTypePrec 10 a . showChar ' ' . showsTypePrec 10 b
-    FunType (a :-> b) -> showParen (p > 10) $
-        showsTypePrec 10 a . showString infixString . showsTypePrec 10 b
-          where
-            infixString = case typeKind a of
-                ConstraintKind -> " => "
-                _              -> " -> "
-    Forall vs t -> showString (unwords $ "forall" : map varName vs) .
-                   showString ". " . showsTypePrec 0 t
-
-showType :: Type -> String
-showType t = showsTypePrec 0 t ""
-
-isPromotable :: Type -> Bool
-isPromotable t = case t of
-    FunType (a :-> b) -> isStar a && isPromotable b
-    _ -> isStar t
+-- | Traverse two Types in parallel, producing a list of their differences.
+typeDifferences :: Type -> Type -> [([TypeStep], Type, Type)]
+typeDifferences = go []
   where
-    isStar a = StarKind == typeKind a
+    go trail a b = case (a,b) of
+        (Apply a0 b0, Apply a1 b1) ->
+            go (StepApply StepLeft : trail) a0 a1 ++
+            go (StepApply StepRight : trail) b0 b1
+        (Fun a0 b0, Fun a1 b1) ->
+            go (StepFun StepLeft : trail) a0 a1 ++
+            go (StepFun StepRight :trail) b0 b1
+        (Forall vs0 t0, Forall vs1 t1)
+            | vs0 == vs1 ->  -- TODO
+                go (StepForall : trail) t0 t1
+        _ | a == b -> []
+          | otherwise -> [(trail, a, b)]
+  -- TODO: deal with alpha equivalence
+
+
     
 
-promote :: Type -> Maybe Kind
-promote t
-    | isPromotable t = Just $ PromotedType t
-    | otherwise      = Nothing
-
-
-data Kind
-    = KindVar String
-    | StarKind                    -- ^ Lifted types (*)
-    | HashKind                    -- ^ Unlifted types (#)
-    | SuperKind                   -- ^ the type of kinds (BOX)
-    | ConstraintKind              -- ^ Constraints
-    | PromotedType Type           -- ^ promoted type using DataKinds
-    | FunKind (Kind :-> Kind)
-    deriving (Show, Eq, Ord)
-
-{- Kind notes:
-     TODO: GHC also has BOX, AnyK, and OpenKind
--}
-
--- | Determine the result of a `FunKind`. This is a partial function.
-resultKind :: Kind -> Maybe Kind
-resultKind k0 = case k0 of
-    FunKind (_ :-> k) -> Just k
-    _ -> Nothing
-
-
-showsKind :: Kind -> ShowS
-showsKind k = case k of
-    KindVar s -> showString s
-    StarKind -> showChar '*'
-    HashKind -> showChar '#'
-    SuperKind -> showString "BOX"
-    ConstraintKind -> showString "Constraint"
-    PromotedType t -> showString "[showsKind: ERROR PromotedType TODO]"
-    FunKind (ka :-> kr) -> showsKind ka . showString " -> " . showsKind kr
-
-showKind :: Kind -> String
-showKind k = showsKind k ""
-
+wiredTypeKind :: WiredType -> Kind
+wiredTypeKind w = case w of
+    WBool     -> basicTypeConKind 0
+    WEq       -> FunKind $ StarKind :-> ConstraintKind
+    WOrdering -> FunKind $ StarKind :-> ConstraintKind
+    WChar     -> basicTypeConKind 0
+    WDouble   -> basicTypeConKind 0
+    WFloat    -> basicTypeConKind 0
+    WInt      -> basicTypeConKind 0
+    WWord     -> basicTypeConKind 0
+    WList     -> basicTypeConKind 1
+    WUnit     -> basicTypeConKind 0
+    WTuple a  -> basicTypeConKind a

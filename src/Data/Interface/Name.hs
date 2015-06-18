@@ -32,11 +32,15 @@ data SomeName = SomeName !Namespace !RawName
 
 
 type ModuleName = String
--- TODO:  type ModuleName = Text
+-- TODO:  ModuleName must encode precise origin
+--          (package w/ version or filename)
 
 -- | @Qual n@ is a value of type @n@ tagged with a `ModuleName`.
 data Qual n = Qual !ModuleName !n
     deriving (Show, Eq, Ord, Functor)
+
+qualModuleName :: Qual n -> ModuleName
+qualModuleName (Qual mn _) = mn
 
 -- | Format a qualified name for display to the user
 formatQualName :: (HasRawName n) => Qual n -> String

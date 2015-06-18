@@ -20,12 +20,13 @@ import qualified InstEnv
 import qualified SrcLoc
 import qualified FastString
 import qualified Var
+import qualified TyCon
 import qualified Type
 import qualified Kind
 
-import Data.Interface.Source as Module
-import Data.Interface.Type as Module
-import Data.Interface.Module as Module
+import Data.Interface.Source as Interface
+import Data.Interface.Type as Interface
+import Data.Interface.Module as Interface
 
 import Debug.Trace
 
@@ -86,7 +87,7 @@ typecheckedModuleInterface typMod = do
     modInfo = moduleInfo typMod
     modName = makeModuleName thisModule
 
-    thisModule :: Module
+    thisModule :: GHC.Module
     thisModule = ms_mod . pm_mod_summary . tm_parsed_module $ typMod
 
     makeClassInstance :: ClsInst -> ClassInstance
@@ -95,7 +96,7 @@ typecheckedModuleInterface typMod = do
                       (map makeType $ InstEnv.is_tys ci)     -- class kind
 
 
--- | Produce an `Export` from a `GHC.Module` and a `GHC.Name` included in
+-- | Produce an `Export` from a `GHC.Interface` and a `GHC.Name` included in
 -- that module's export list, distinguishing locally-defined
 -- exports from re-exports.
 --
@@ -104,7 +105,7 @@ typecheckedModuleInterface typMod = do
 -- Note: this results in qualified names that refer to the original module,
 -- rather than the imported module
 --  (e.g. Data.List.foldr will appear as Data.Foldable.foldr)
-nameToExport :: GHC.Module -> GHC.Name -> Ghc Module.Export
+nameToExport :: GHC.Module -> GHC.Name -> Ghc Interface.Export
 nameToExport thisModule ghcName = do
     Just (thing, _fixity, _, _) <- getInfo False ghcName
     -- TODO: ^ handle this properly: if `name` is not in the GHC
@@ -118,12 +119,8 @@ nameToExport thisModule ghcName = do
         else LocalExport sdecl
 
 
-makeQual :: GHC.Module -> a -> Module.Qual a
-makeQual = Module.Qual . makeModuleName
-
-
 -- TODO: type families
-thingToSomeDecl :: GHC.TyThing -> Module.SomeDecl
+thingToSomeDecl :: GHC.TyThing -> Interface.SomeDecl
 thingToSomeDecl thing = case thing of
     ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
     AnId a ->                                       -- value
@@ -138,9 +135,9 @@ thingToSomeDecl thing = case thing of
         | isClassTyCon tyCon ->                     -- class definitions
             mkTypeDecl $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            mkTypeDecl $ Module.DataType kind
+            mkTypeDecl $ Interface.DataType kind
       where
-        kind = tyconKind tyCon
+        kind = makeKind $ TyCon.tyConKind tyCon
   where
     mkValueDecl :: ValueDecl -> SomeDecl
     mkValueDecl = SomeValue . makeNamed (getName thing)
@@ -149,37 +146,61 @@ thingToSomeDecl thing = case thing of
     mkTypeDecl = SomeType . makeNamed (getName thing)
 
 
-makeType :: GHC.Type -> Module.Type
+-- TODO: type family instances
+makeTypeCon :: GHC.TyCon -> Interface.TypeCon
+makeTypeCon tc
+    | Just _cls <- TyCon.tyConClass_maybe tc =
+        typeCon ConClass
+        --Dict [makeClass cls]
+    | TyCon.isAlgTyCon tc   =
+        typeCon $ ConAlgebraic dataConList
+    | TyCon.isTypeSynonymTyCon tc =
+        typeCon ConSynonym
+    | TyCon.isFamInstTyCon tc =
+        error "makeTyconType: family instances not implemented"
+--  | isFunTyCon tc = 
+--  | isPrimTyCon tc = 
+--  | isTupleTyCon tc = 
+--  | isUnboxedTupleTyCon tc = 
+--  | isBoxedTupleTyCon tc = 
+--  | isPromotedDataCon tc = 
+  where
+    typeCon info = TypeCon info kind
+    kind = makeKind $ TyCon.tyConKind tc
+
+    dataConList :: DataConList
+    dataConList | TyCon.isAbstractTyCon tc = Abstract
+                | otherwise = DataConList $ map makeDataCon $ tyConDataCons tc
+
+    makeDataCon :: GHC.DataCon -> Named ()
+    makeDataCon dc = makeNamed dc ()
+
+
+-- TODO: numeric and string literals
+makeType :: GHC.Type -> Interface.Type
 makeType t0 = case splitForAllTys t0 of
     ([], t)
         | Just tyVar <- Type.getTyVar_maybe t ->
             Var $ makeTypeVar tyVar
         | Just (ta, tb) <- Type.splitFunTy_maybe t ->
-            FunType $ makeType ta :-> makeType tb
+            Fun (makeType ta) (makeType tb)
         | Just (ta, tb) <- Type.splitAppTy_maybe t ->
-            AppType (makeType ta) (makeType tb)
+            Apply (makeType ta) (makeType tb)
+        | Just (tc, ts) <- Type.splitTyConApp_maybe t ->
+            applyType (Con $ makeQualNamed tc $ makeTypeCon tc)
+                      (map makeType ts)
         | otherwise ->
-            Type (unsafeOutput t) (makeKind $ Type.typeKind t)
+            error $ "makeType: " ++ unsafeOutput t
     (vs, t) ->
         Forall (map makeTypeVar vs) (makeType t)
   where
     makeTypeVar :: GHC.TyVar -> TypeVar
     makeTypeVar tyVar =
         TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
-{-
-        error $ "makeType: unimplemented type: " ++ unsafeOutput t ++ " " ++
-            case () of
-              () | Just _ <- Type.isNumLitTy t -> "(NumLitTy)"
-                 | Just _ <- Type.isStrLitTy t -> "(StringLitTy)"
-                 | Type.isDictLikeTy t -> "(DictLikeTy)"
-                 | Type.isPrimitiveType t -> "(Primitive)"
-                 | Type.isAlgType t -> "(AlgType)"
-                 | otherwise -> ""
--}
 
 
 -- TODO: promoted types
-makeKind :: GHC.Kind -> Module.Kind
+makeKind :: GHC.Kind -> Interface.Kind
 makeKind k0 = case splitForAllTys k0 of
     (_, k)   -- ignore forall, for now
         | Just (ka, kb) <- Type.splitFunTy_maybe k ->
@@ -190,25 +211,21 @@ makeKind k0 = case splitForAllTys k0 of
         | Kind.isSuperKind k        -> SuperKind
         | otherwise                 -> KindVar $ unsafeOutput k
 
-tyconKind :: GHC.TyCon -> Module.Kind
-tyconKind tyCon =   -- trace t $
-    go (map Type.typeKind . Type.mkTyVarTys $ tyConTyVars tyCon)
-       (synTyConResKind tyCon)
+
+makeNamed :: (GHC.NamedThing n) => n -> a -> Named a
+makeNamed n = Named (getOccString ghcName) (makeOrigin ghcName)
   where
-    go :: [GHC.Kind] -> GHC.Kind -> Module.Kind
-    go [] res = makeKind res
-    go (a:args) res = FunKind $ makeKind a :-> go args res
-        
-    t = unwords
-            [ "TRACE tyconKind:"
-            , getOccString tyCon
-            , show $ map (unsafeOutput . Var.varType) $ tyConTyVars tyCon
-            , unsafeOutput $ synTyConResKind tyCon
-            ]
+    ghcName = getName n
 
 
-makeNamed :: GHC.Name -> a -> Named a
-makeNamed ghcName = Named (getOccString ghcName) (makeOrigin ghcName)
+makeQual :: GHC.Module -> a -> Qual a
+makeQual = Interface.Qual . makeModuleName
+
+
+makeQualNamed :: (GHC.NamedThing n) => n -> a -> Qual (Named a)
+makeQualNamed n = makeQual (GHC.nameModule ghcName) . makeNamed ghcName
+  where
+    ghcName = getName n
 
 
 makeOrigin :: GHC.Name -> Origin
@@ -223,8 +240,8 @@ makeOrigin ghcName = case nameSrcSpan ghcName of
         | us == SrcLoc.noSrcSpan -> UnknownSource
         | otherwise -> error $ "makeOrigin: " ++ show us
   where
-    mkLoc :: GHC.RealSrcLoc -> Module.SrcLoc
-    mkLoc loc = Module.SrcLoc (srcLocLine loc) (srcLocCol loc)
+    mkLoc :: GHC.RealSrcLoc -> Interface.SrcLoc
+    mkLoc loc = Interface.SrcLoc (srcLocLine loc) (srcLocCol loc)
 
 
 
@@ -239,7 +256,7 @@ unsafeOutput :: (Out.Outputable a) => a -> String
 unsafeOutput = Out.showSDocUnsafe . Out.ppr
 
 
-makeModuleName :: Module -> Module.ModuleName
+makeModuleName :: GHC.Module -> Interface.ModuleName
 makeModuleName = moduleNameString . GHC.moduleName
 
 
