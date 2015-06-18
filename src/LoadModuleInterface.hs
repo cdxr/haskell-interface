@@ -140,10 +140,10 @@ thingToSomeDecl thing = case thing of
         kind = makeKind $ TyCon.tyConKind tyCon
   where
     mkValueDecl :: ValueDecl -> SomeDecl
-    mkValueDecl = SomeValue . makeNamed (getName thing)
+    mkValueDecl = SomeValue . makeNamed thing
 
     mkTypeDecl :: TypeDecl -> SomeDecl
-    mkTypeDecl = SomeType . makeNamed (getName thing)
+    mkTypeDecl = SomeType . makeNamed thing
 
 
 -- TODO: type family instances
@@ -204,7 +204,7 @@ makeKind :: GHC.Kind -> Interface.Kind
 makeKind k0 = case splitForAllTys k0 of
     (_, k)   -- ignore forall, for now
         | Just (ka, kb) <- Type.splitFunTy_maybe k ->
-            FunKind $ makeKind ka :-> makeKind kb
+            FunKind (makeKind ka) (makeKind kb)
         | Kind.isLiftedTypeKind k   -> StarKind
         | Kind.isUnliftedTypeKind k -> HashKind
         | Kind.isConstraintKind k   -> ConstraintKind
@@ -215,7 +215,7 @@ makeKind k0 = case splitForAllTys k0 of
 makeNamed :: (GHC.NamedThing n) => n -> a -> Named a
 makeNamed n = Named (getOccString ghcName) (makeOrigin ghcName)
   where
-    ghcName = getName n
+    ghcName = GHC.getName n
 
 
 makeQual :: GHC.Module -> a -> Qual a
@@ -225,7 +225,7 @@ makeQual = Interface.Qual . makeModuleName
 makeQualNamed :: (GHC.NamedThing n) => n -> a -> Qual (Named a)
 makeQualNamed n = makeQual (GHC.nameModule ghcName) . makeNamed ghcName
   where
-    ghcName = getName n
+    ghcName = GHC.getName n
 
 
 makeOrigin :: GHC.Name -> Origin

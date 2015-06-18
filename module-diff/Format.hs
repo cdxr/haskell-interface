@@ -52,15 +52,16 @@ instance Format (Name s) where
 instance Format Type where
     format t =
         Node "[Type]"
-            [ pure $ "show: " ++ show t
-            , pure $ "render: " ++ prettyPrintType qualifyAll t
+            --[ pure $ "show: " ++ show t
+            --, pure $ "render: " ++ pprintType qualifyAll t
+            [ typeTreeFormat qualifyAll t
             ]
 
 instance Format Kind where
     format k = 
         Node "[Kind]"
-            [ pure $ "show: " ++ show k
-            , pure $ "render: " ++ showKind k
+            --[ pure $ "show: " ++ show k
+            [ pure $ "render: " ++ showKind k
             ]
 
 instance Format ValueDecl where
@@ -99,9 +100,35 @@ instance Format Origin where
         showLoc (SrcLoc l c) = show l ++ ":" ++ show c
         
 instance Format (Qual SomeName) where
-    format qual = pure $ formatQualName qual ++ case namespace qual of
+    format qual = pure $ showQualName qual ++ case namespace qual of
         Values -> " (value)"
         Types -> " (type)"
 
 instance Format ClassInstance where
     format = pure . show
+
+
+typeTreeFormat :: QualContext -> Type -> FormatTree
+typeTreeFormat qc = go
+  where
+    go t0 = case t0 of
+        Var (TypeVar s k) -> pure s
+        Con qual -> pure $ resolveQual qc qual
+        Link qual -> pure $ resolveQual qc qual
+        Apply{} -> 
+            let tcon : params = flattenApply t0
+            in formatNode (pprintType qc tcon) (map go params)
+        Fun a b ->
+            formatNode "(->)" [go a, go b]
+        Forall vs t ->
+            formatNode "Forall "
+                [ formatNode "[vars]" $ map (pure . pprintVar qc) vs
+                , go t
+                ]
+
+flattenApply :: Type -> [Type]
+flattenApply t0 = case t0 of
+    Apply a r -> case a of
+        Apply as t -> flattenApply as ++ [t,r]
+        _ -> [a,r]
+    _ -> [t0]

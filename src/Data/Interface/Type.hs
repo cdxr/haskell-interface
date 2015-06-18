@@ -48,8 +48,8 @@ typeDifferences = go []
 wiredTypeKind :: WiredType -> Kind
 wiredTypeKind w = case w of
     WBool     -> basicTypeConKind 0
-    WEq       -> FunKind $ StarKind :-> ConstraintKind
-    WOrdering -> FunKind $ StarKind :-> ConstraintKind
+    WEq       -> FunKind StarKind ConstraintKind
+    WOrdering -> FunKind StarKind ConstraintKind
     WChar     -> basicTypeConKind 0
     WDouble   -> basicTypeConKind 0
     WFloat    -> basicTypeConKind 0

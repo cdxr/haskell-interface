@@ -20,13 +20,20 @@ import Format
 main :: IO ()
 main = do
     args <- parseProgramArgs
-    mdiff <- prepareModuleDiff args
-    runReport (reportChanges mdiff) args
+    result <- prepareModuleDiff args
+    runReport (reportResult result) args
 
 
-prepareModuleDiff :: ProgramArgs -> IO ModuleDiff
-prepareModuleDiff args =
-    diffModules <$> loadModule mod0 <*> loadModule mod1
+data Result = Result
+    { targetIds     :: (String, String)
+    , theModuleDiff :: ModuleDiff
+    } deriving (Show)
+
+
+prepareModuleDiff :: ProgramArgs -> IO Result
+prepareModuleDiff args = do
+    mdiff <- diffModules <$> loadModule mod0 <*> loadModule mod1
+    pure $ Result (mod0, mod1) mdiff
   where
     Target mod0 mod1 = programTarget args
 
@@ -57,6 +64,7 @@ dumpModuleInterface modIf = do
     makeNode lbl = formatNode lbl . map format . toList
 
 
+
 newtype Report a = Report (ReaderT ProgramArgs IO a)
     deriving (Functor, Applicative, Monad)
 
@@ -65,27 +73,54 @@ runReport (Report m) args = do
     a <- runReaderT m args
     a <$ ANSI.setSGR [ANSI.Reset]
 
-output :: ANSI.Color -> String -> Report ()
-output color s = Report . lift $ putStrLn $ setColor color ++ s
+whenFlag :: (ProgramArgs -> Flag) -> Report a -> Report (Maybe a)
+whenFlag f m = do
+    b <- Report $ asks f
+    if b then Just <$> m else pure Nothing
+
+whenFlag_ :: (ProgramArgs -> Flag) -> Report a -> Report ()
+whenFlag_ f = void . whenFlag f
+
+
+setColor :: ANSI.Color -> Report ()
+setColor c = Report . lift $ putStr s
   where
-    setColor :: ANSI.Color -> String
-    setColor c = ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
+    s = ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
+
+outputLine :: String -> Report ()
+outputLine = Report . lift . putStrLn
 
 
 outputTree :: FormatTree -> Report ()
 outputTree = Report . lift . printFormatTree 2
 
 
+reportResult :: Result -> Report ()
+reportResult res = do
+    let (t0, t1) = targetIds res
+    outputLine $ unlines
+        [ ""
+        , "************************************"
+        , " Comparing Targets:"
+        , "   " ++ t0
+        , "   " ++ t1
+        , "************************************"
+        ]
+    reportChanges $ theModuleDiff res
+
+
 reportChanges :: ModuleDiff -> Report ()
 reportChanges mdiff = do
+
     onDiff (diffModuleName mdiff) $ \(Replace a b) ->
-        output ANSI.White $
-            "Module renamed from " ++ show a ++ " to " ++ show b
+        outputLine $ "Module renamed from " ++ show a ++ " to " ++ show b
 
     reportSummary "Local Values" $ diffMapSummary $ diffModuleValues mdiff
     reportSummary "Local Types"  $ diffMapSummary $ diffModuleTypes mdiff
     reportSummary "Reexports"    $ diffSetSummary $ diffModuleReexports mdiff
-    reportSummary "Instances"    $ diffSetSummary $ diffModuleInstances mdiff
+
+    whenFlag_ outputClassInstances $
+        reportSummary "Instances" $ diffSetSummary $ diffModuleInstances mdiff
 
   where
     onDiff :: (Applicative m) => Diff c a -> (c -> m b) -> m ()
@@ -95,7 +130,7 @@ reportChanges mdiff = do
 
 reportSummary :: (Format c, Format a) => String -> DiffSummary c a -> Report ()
 reportSummary title summary = do
-    output ANSI.White $ unlines
+    outputLine $ unlines
         [ ""
         , "*** " ++ title ++ " ***"
         , show (length $ unchanged summary) ++ " unchanged"
@@ -107,11 +142,11 @@ reportSummary title summary = do
     outputAll "changed" ANSI.Blue  $ changed summary
     outputAll "added"   ANSI.Green $ added summary
     outputAll "removed" ANSI.Red   $ removed summary
-
   where
     outputAll ::
         (Foldable f, Format a) =>
         String -> ANSI.Color -> f a -> Report ()
     outputAll category color es = do
-        output color $ "* " ++ title ++ " (" ++ category ++ ")"
+        setColor color
+        outputLine $ "* " ++ title ++ " (" ++ category ++ ")"
         forM_ es $ outputTree . format

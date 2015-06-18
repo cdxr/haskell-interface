@@ -2,6 +2,7 @@ module ProgramArgs
 (
     parseProgramArgs
   , ProgramArgs(..)
+  , Flag
   , Target(..)
 )
 where
@@ -17,10 +18,12 @@ parseProgramArgs =
         info (helper <*> mainParser)
              (fullDesc <> header "compare module interfaces")
 
+type Flag = Bool
 
 data ProgramArgs = ProgramArgs
-    { dumpInterfaces :: Bool
-    , programTarget  :: Target
+    { dumpInterfaces       :: Flag
+    , outputClassInstances :: Flag
+    , programTarget        :: Target
     } deriving (Show, Eq, Ord)
 
 data Target = Target FilePath FilePath
@@ -33,13 +36,14 @@ mainParser = ProgramArgs
         ( long "dump"
        <> short 'd'
        <> help "Print all loaded module interfaces." )
+    <*> pure False
     <*> (builtinTarget <|> target)
 
 
 target :: Parser Target
 target = Target
-    <$> argument str (metavar "TARGET")
-    <*> argument str (metavar "TARGET")
+    <$> argument str (metavar "OLD-TARGET")
+    <*> argument str (metavar "NEW-TARGET")
 
 
 readBuiltinTarget :: ReadM Target

@@ -8,6 +8,9 @@
 
 module Data.Interface.Name where
 
+import Data.Set ( Set )
+import qualified Data.Set as Set
+
 import Data.Interface.Source
 
 
@@ -43,8 +46,8 @@ qualModuleName :: Qual n -> ModuleName
 qualModuleName (Qual mn _) = mn
 
 -- | Format a qualified name for display to the user
-formatQualName :: (HasRawName n) => Qual n -> String
-formatQualName (Qual modName n) = modName ++ '.' : rawName n
+showQualName :: (HasRawName n) => Qual n -> String
+showQualName (Qual modName n) = modName ++ '.' : rawName n
 
 
 class HasNamespace n where
@@ -130,5 +133,20 @@ instance HasNamespace a => HasSomeName (Named a) where
 -- | If @n@ has a `RawName` and determines a namespace @s@, it has a @Name s@.
 type (HasName s n) = (HasRawName n, Space n ~ 'Just s)
 
-name :: (HasName s n) => n -> Name s
-name = Name . rawName
+getName :: (HasName s n) => n -> Name s
+getName = Name . rawName
+
+
+type QualContext = Set ModuleName
+
+-- | A context where all names are fully qualified
+qualifyAll :: QualContext
+qualifyAll = Set.empty
+
+-- | The qualified or unqualified name, depending on context.
+resolveQual :: (HasRawName n) => QualContext -> Qual n -> String
+resolveQual qc qualName@(Qual modName n)
+    | modName `Set.member` qc = rawName n
+    | otherwise = showQualName qualName
+
+

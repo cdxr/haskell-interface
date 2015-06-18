@@ -68,17 +68,14 @@ data WiredType
     deriving (Show, Eq, Ord)
 
 
-data a :-> b = a :-> b
-    deriving (Show, Eq, Ord)
-
 data Kind
     = KindVar String
-    | StarKind                    -- ^ Lifted types (*)
-    | HashKind                    -- ^ Unlifted types (#)
-    | SuperKind                   -- ^ the type of kinds (BOX)
-    | ConstraintKind              -- ^ Constraints
-    | PromotedType Type           -- ^ promoted type using DataKinds
-    | FunKind (Kind :-> Kind)
+    | StarKind                     -- ^ Lifted types (*)
+    | HashKind                     -- ^ Unlifted types (#)
+    | SuperKind                    -- ^ the type of kinds (BOX)
+    | ConstraintKind               -- ^ Constraints
+    | PromotedType (Qual TypeName) -- ^ promoted type using DataKinds
+    | FunKind Kind Kind
     deriving (Show, Eq, Ord)
 
 {- Kind notes:
@@ -88,7 +85,7 @@ data Kind
 -- | Determine the result of a `FunKind`. This is a partial function.
 resultKind :: Kind -> Maybe Kind
 resultKind k0 = case k0 of
-    FunKind (_ :-> k) -> Just k
+    FunKind _ k -> Just k
     _ -> Nothing
 
 
@@ -100,7 +97,7 @@ showsKind k = case k of
     SuperKind -> showString "BOX"
     ConstraintKind -> showString "Constraint"
     PromotedType t -> showString "[showsKind: ERROR PromotedType TODO]"
-    FunKind (ka :-> kr) -> showsKind ka . showString " -> " . showsKind kr
+    FunKind ka kr -> showsKind ka . showString " -> " . showsKind kr
 
 showKind :: Kind -> String
 showKind k = showsKind k ""
@@ -113,4 +110,4 @@ basicTypeConKind a
     | otherwise = go a
   where
     go 0 = StarKind
-    go n = FunKind $ StarKind :-> go (n-1)
+    go n = FunKind StarKind $ go (n-1)
