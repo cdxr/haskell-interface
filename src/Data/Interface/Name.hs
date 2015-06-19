@@ -8,11 +8,18 @@
 
 module Data.Interface.Name where
 
+import Data.Coerce
+
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
+import Data.Map ( Map )
+import qualified Data.Map as Map
+
 import Data.Interface.Source
 
+
+-- * Name Types
 
 -- | An unqualified name that could belong to any namespace
 type RawName = String
@@ -38,6 +45,9 @@ type ModuleName = String
 -- TODO:  ModuleName must encode precise origin
 --          (package w/ version or filename)
 
+
+-- * Qual
+
 -- | @Qual n@ is a value of type @n@ tagged with a `ModuleName`.
 data Qual n = Qual !ModuleName !n
     deriving (Show, Eq, Ord, Functor)
@@ -45,10 +55,15 @@ data Qual n = Qual !ModuleName !n
 qualModuleName :: Qual n -> ModuleName
 qualModuleName (Qual mn _) = mn
 
+unqual :: Qual a -> a
+unqual (Qual _ a) = a
+
 -- | Format a qualified name for display to the user
 showQualName :: (HasRawName n) => Qual n -> String
 showQualName (Qual modName n) = modName ++ '.' : rawName n
 
+
+-- * Name classes
 
 class HasNamespace n where
     -- | @Just@ the statically-known namespace, or @Nothing@ if the namespace
@@ -83,8 +98,14 @@ instance (HasNamespace n) => HasNamespace (Qual n) where
 class HasRawName n where
     rawName :: n -> RawName
 
+instance HasRawName RawName where
+    rawName = id
+    {-# INLINABLE rawName #-}
+
 instance HasRawName (Name s) where
-    rawName (Name s) = s
+    -- rawName (Name s) = s
+    rawName = coerce
+    {-# INLINABLE rawName #-}
 
 instance HasRawName SomeName where
     rawName (SomeName _ s) = s
@@ -106,10 +127,21 @@ instance HasSomeName (Name 'Types) where
 
 instance HasSomeName SomeName where
     someName = id
+    {-# INLINABLE someName #-}
 
 instance (HasSomeName n) => HasSomeName (Qual n) where
     someName (Qual _ n) = someName n
 
+
+-- | If @n@ has a `RawName` and determines a namespace @s@, it has a @Name s@.
+type (HasName s n) = (HasRawName n, Space n ~ 'Just s)
+
+getName :: (HasName s n) => n -> Name s
+getName = coerce . rawName
+{-# INLINABLE getName #-}
+
+
+-- * Named
 
 data Named a = Named !RawName !Origin a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
@@ -130,12 +162,7 @@ instance HasNamespace a => HasNamespace (Named a) where
 instance HasNamespace a => HasSomeName (Named a) where
 
 
--- | If @n@ has a `RawName` and determines a namespace @s@, it has a @Name s@.
-type (HasName s n) = (HasRawName n, Space n ~ 'Just s)
-
-getName :: (HasName s n) => n -> Name s
-getName = Name . rawName
-
+-- * QualContext
 
 type QualContext = Set ModuleName
 
@@ -150,3 +177,17 @@ resolveQual qc qualName@(Qual modName n)
     | otherwise = showQualName qualName
 
 
+-- * NameMap
+
+type NameMap = Map RawName
+
+nameMapFromList :: (HasRawName a) => [a] -> NameMap a
+nameMapFromList = Map.fromList . map (\x -> (rawName x, x))
+
+lookupName :: (HasName s n, HasName s a) => n -> NameMap a -> Maybe a
+lookupName = Map.lookup . rawName
+{-# INLINABLE lookupName #-}
+
+lookupRawName :: RawName -> NameMap a -> Maybe a
+lookupRawName = Map.lookup
+{-# INLINABLE lookupRawName #-}

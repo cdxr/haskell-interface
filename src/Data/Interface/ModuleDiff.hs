@@ -1,17 +1,14 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}  -- temporary
 
 module Data.Interface.ModuleDiff where
 
+import qualified Data.Set as Set ( fromList )
 import Data.Function ( on )
 
 import Data.Interface.Module
+import Data.Interface.Name
 import Data.Interface.Change
 
 
@@ -20,41 +17,40 @@ import Data.Interface.Change
 -- before or after the changes.
 --
 data ModuleDiff = ModuleDiff
-    { diffModuleName      :: !(DiffEq ModuleName)
-    , diffModuleValues    :: !(DiffMap RawName ValueChange (Named ValueDecl))
-    , diffModuleTypes     :: !(DiffMap RawName TypeChange (Named TypeDecl))
-    , diffModuleReexports :: !(DiffSetEq (Qual SomeName))
-    , diffModuleInstances :: !(DiffSetEq ClassInstance)
-    }
-
-deriving instance Show ModuleDiff
+    { diffModuleName       :: !(DiffEq ModuleName)
+--  , diffModuleTypes      :: !(DiffMap RawName TypeChange Type)
+    , diffModuleValueDecls :: !(DiffMap RawName ValueDeclChange (Named ValueDecl))
+    , diffModuleTypeDecls  :: !(DiffMap RawName TypeDeclChange (Named TypeDecl))
+    , diffModuleExportList :: !(DiffSetEq ExportName)
+    , diffModuleInstances  :: !(DiffSetEq ClassInstance)
+    } deriving (Show)
 
 
 diffModules :: ModuleInterface -> ModuleInterface -> ModuleDiff
 diffModules a b = ModuleDiff
-    { diffModuleName      = on diffEq moduleName a b
-    , diffModuleValues    = on diffMap moduleValues a b
-    , diffModuleTypes     = on diffMap moduleTypes a b
-    , diffModuleReexports = on diffSet moduleReexports a b
-    , diffModuleInstances = on diffSet moduleInstances a b
+    { diffModuleName       = on diffEq moduleName a b
+    , diffModuleValueDecls = on diffMap moduleValueDecls a b
+    , diffModuleTypeDecls  = on diffMap moduleTypeDecls a b
+    , diffModuleExportList = on diffSet (Set.fromList . moduleExportList) a b
+    , diffModuleInstances  = on diffSet moduleInstances a b
     }
 
 
 -- TODO: the definitions of ValueChange and TypeChange are temporary
 
-newtype ValueChange = ValueChange (Replace (Named ValueDecl))
+newtype ValueDeclChange = ValueDeclChange (Replace (Named ValueDecl))
     deriving (Show, Eq, Ord)
 
-instance Change (Named ValueDecl) ValueChange where
+instance Change (Named ValueDecl) ValueDeclChange where
     change a b
-        | namedThing a == namedThing b = Just $ ValueChange $ Replace a b
+        | namedThing a == namedThing b = Just $ ValueDeclChange $ Replace a b
         | otherwise = Nothing
 
 
-newtype TypeChange = TypeChange (Replace (Named TypeDecl))
+newtype TypeDeclChange = TypeDeclChange (Replace (Named TypeDecl))
     deriving (Show, Eq, Ord)
 
-instance Change (Named TypeDecl) TypeChange where
+instance Change (Named TypeDecl) TypeDeclChange where
     change a b
-        | namedThing a == namedThing b = Just $ TypeChange $ Replace a b
+        | namedThing a == namedThing b = Just $ TypeDeclChange $ Replace a b
         | otherwise = Nothing

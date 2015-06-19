@@ -6,6 +6,7 @@ import Control.Monad
 import Data.Tree
 
 import Data.Interface
+import Data.Interface.Change
 
 
 type FormatTree = Tree String
@@ -39,11 +40,11 @@ instance Format a => Format (Replace a) where
             , prepend "to:   " (format b)
             ]
 
-instance Format ValueChange where
-    format (ValueChange r) = format r
+instance Format ValueDeclChange where
+    format (ValueDeclChange r) = format r
 
-instance Format TypeChange where
-    format (TypeChange r) = format r
+instance Format TypeDeclChange where
+    format (TypeDeclChange r) = format r
 
 
 instance Format (Name s) where

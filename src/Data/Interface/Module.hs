@@ -1,30 +1,21 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
-
 module Data.Interface.Module
  (
 -- * ModuleInterface
--- ** Types
-    ModuleInterface
--- ** Construction
-  , emptyModuleInterface
-  , makeModuleInterface
--- ** Components
+    ModuleInterface(..)
+  , ExportName
   , ClassInstance(..)
+  , emptyModuleInterface
+-- ** Exports
   , Export(..)
--- ** Inspection
-  , moduleName
   , moduleExports
-  , moduleValues
-  , moduleTypes
-  , moduleReexports
-  , moduleInstances
+  , splitExports
+
 -- * Re-exports
-  , module Data.Interface.Name
   , module Data.Interface.Module.Decl
  )
 where
 
+import Data.Maybe ( catMaybes )
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
@@ -33,6 +24,7 @@ import Data.Set ( Set )
 import qualified Data.Set as Set
 
 import Data.Interface.Name
+import Data.Interface.Type
 
 import Data.Interface.Module.Decl
 
@@ -42,65 +34,15 @@ import Data.Interface.Module.Decl
 -- when examining differences between module versions.
 data ModuleInterface = ModuleInterface
     { moduleName       :: !ModuleName
-    -- locally-defined:
-    , moduleValues     :: !(Map RawName (Named ValueDecl))
-    , moduleTypes      :: !(Map RawName (Named TypeDecl))
-    -- re-exported:
-    , moduleReexports  :: !(Set (Qual SomeName))
-    -- implicitly exported:
+    , moduleTypes      :: !(Map RawName Type)
+    , moduleValueDecls :: !(Map RawName (Named ValueDecl))
+    , moduleTypeDecls  :: !(Map RawName (Named TypeDecl))
+    , moduleExportList :: ![ExportName]
     , moduleInstances  :: !(Set ClassInstance)
-    }
+ -- , moduleDepends    :: !(Set ModuleName) -- cached list of dependencies
+    } deriving (Show)
 
-deriving instance Show ModuleInterface
-
-
-{- ModuleInterface notes:
-
-   - This will only contain info that is visible to dependent packages.
-   - Re-exports are currently sets of names, but later they will map to
-     other ModuleInterfaces
-   - Class instances are only stubs now; type/data family instances are not
-     considered yet
--}
-
-
-emptyModuleInterface :: ModuleName -> ModuleInterface
-emptyModuleInterface modName = ModuleInterface
-    { moduleName      = modName
-    , moduleValues    = Map.empty
-    , moduleTypes     = Map.empty
-    , moduleReexports = Set.empty
-    , moduleInstances = Set.empty
-    }
-
-makeModuleInterface
-    :: ModuleName -> [Export] -> [ClassInstance] -> ModuleInterface
-makeModuleInterface modName exports instances =
-    foldr addExport newModIf exports
-  where 
-    newModIf :: ModuleInterface
-    newModIf =
-        (emptyModuleInterface modName)
-            { moduleInstances = Set.fromList instances }
-
-
-addExport :: Export -> ModuleInterface -> ModuleInterface
-addExport e = case e of
-    LocalExport decl -> addDecl decl
-    Reexport qualName -> addReexport qualName
-
-
-addDecl :: SomeDecl -> ModuleInterface -> ModuleInterface
-addDecl sd modInt = case sd of
-    SomeValue decl -> modInt
-        {moduleValues = Map.insert (rawName decl) decl (moduleValues modInt)}
-    SomeType decl -> modInt
-        {moduleTypes = Map.insert (rawName decl) decl (moduleTypes modInt)}
-
-
-addReexport :: Qual SomeName -> ModuleInterface -> ModuleInterface
-addReexport qual modInt = modInt
-        {moduleReexports = Set.insert qual (moduleReexports modInt)}
+type ExportName = Qual SomeName
 
 
 type ClassName = String
@@ -114,24 +56,65 @@ data ClassInstance = ClassInstance !ClassName [Type]
 {- ClassInstance notes:
       - The `ClassName` field will have to be replaced with a value of a
         proper `Class` type, when that is defined.
-      - The `[Type]` field might be problematic when used with ConstraintKinds
-        (TODO: look into this)
 -}
 
 
+emptyModuleInterface :: ModuleName -> ModuleInterface
+emptyModuleInterface modName = ModuleInterface
+    { moduleName       = modName
+    , moduleTypes      = Map.empty
+    , moduleValueDecls = Map.empty
+    , moduleTypeDecls  = Map.empty
+    , moduleExportList = []
+    , moduleInstances  = Set.empty
+    }
 
--- | An element of a module's export list
+
 data Export
-    = LocalExport SomeDecl
-    | Reexport (Qual SomeName)
-    deriving (Show)
+    = LocalValue (Qual (Named ValueDecl))
+    | LocalType (Qual (Named TypeDecl))
+    | ReExport ExportName
+    deriving (Show, Eq, Ord)
 
---deriving instance Show Export
+exportName :: Export -> ExportName
+exportName e = case e of
+    LocalValue q -> fmap someName q
+    LocalType q  -> fmap someName q
+    ReExport q   -> q
 
--- | All module exports
+
+-- | @splitExports es@ is the tuple containing a list of all export names,
+-- a list of all value declarations, and a list of all type declarations.
+splitExports :: [Export] -> ([ExportName], [Named ValueDecl], [Named TypeDecl])
+splitExports es =
+    let (names, mvals, mtypes) = unzip3 $ map makeTup es
+    in (names, catMaybes mvals, catMaybes mtypes)
+  where
+    makeTup e = case e of
+        LocalValue q -> (exportName e, Just $ unqual q, Nothing)
+        LocalType q  -> (exportName e, Nothing, Just $ unqual q)
+        ReExport{}   -> (exportName e, Nothing, Nothing)
+        
+
 moduleExports :: ModuleInterface -> [Export]
-moduleExports modIf = concat
-    [ map (LocalExport . SomeValue) $ Map.elems $ moduleValues modIf
-    , map (LocalExport . SomeType)  $ Map.elems $ moduleTypes modIf
-    , map Reexport $ Set.toList $ moduleReexports modIf
-    ]
+moduleExports iface = map mkExport (moduleExportList iface)
+  where
+    mkExport :: ExportName -> Export
+    mkExport exName
+        | moduleName iface /= modName = ReExport exName
+        | otherwise = case namespace exName of
+            Values -> LocalValue . lookupQual $ moduleValueDecls iface
+            Types -> LocalType . lookupQual $ moduleTypeDecls iface
+      where
+        modName = qualModuleName exName
+
+        lookupQual :: NameMap a -> Qual a
+        lookupQual = Qual modName . takeJust . lookupRawName (rawName exName)
+
+        takeJust Nothing =
+            error $ "moduleExports: missing name: " ++ rawName exName
+        takeJust (Just a) = a
+            
+
+lookupValueDecl :: ValueName -> ModuleInterface -> Maybe (Named ValueDecl)
+lookupValueDecl name = Map.lookup (rawName name) . moduleValueDecls

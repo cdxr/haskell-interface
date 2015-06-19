@@ -11,7 +11,9 @@ import Data.Foldable ( toList )
 import qualified System.Console.ANSI as ANSI
 
 import LoadModuleInterface   ( readModuleInterfaces )
+
 import Data.Interface
+import Data.Interface.Change
 
 import ProgramArgs
 import Format
@@ -54,10 +56,10 @@ dumpModuleInterface modIf = do
         ]
 
     mapM_ (printFormatTree 2)
-        [ makeNode "Values:"     $ moduleValues modIf
-        , makeNode "Types:"      $ moduleTypes modIf
-        , makeNode "Re-exports:" $ moduleReexports modIf
-        , makeNode "Instances:"  $ moduleInstances modIf
+        [ makeNode "Values:"    $ moduleValueDecls modIf
+        , makeNode "Types:"     $ moduleTypeDecls modIf
+        , makeNode "Exports:"   $ moduleExportList modIf
+        , makeNode "Instances:" $ moduleInstances modIf
         ]
   where
     makeNode :: (Foldable f, Format a) => String -> f a -> FormatTree
@@ -115,9 +117,9 @@ reportChanges mdiff = do
     onDiff (diffModuleName mdiff) $ \(Replace a b) ->
         outputLine $ "Module renamed from " ++ show a ++ " to " ++ show b
 
-    reportSummary "Local Values" $ diffMapSummary $ diffModuleValues mdiff
-    reportSummary "Local Types"  $ diffMapSummary $ diffModuleTypes mdiff
-    reportSummary "Reexports"    $ diffSetSummary $ diffModuleReexports mdiff
+    reportSummary "Local Values" $ diffMapSummary $ diffModuleValueDecls mdiff
+    reportSummary "Local Types"  $ diffMapSummary $ diffModuleTypeDecls mdiff
+    reportSummary "Exports"      $ diffSetSummary $ diffModuleExportList mdiff
 
     whenFlag_ outputClassInstances $
         reportSummary "Instances" $ diffSetSummary $ diffModuleInstances mdiff

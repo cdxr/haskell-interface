@@ -16,13 +16,12 @@ newtype TypeEnv = TypeEnv
     { typeEnvMap :: Map ModuleName TypeMap
     } deriving (Show, Eq, Ord)
 
-data MissingType
-    = MissingModule ModuleName
-    | MissingType (Qual TypeName)
-    deriving (Show, Eq)
+emptyTypeEnv :: TypeEnv
+emptyTypeEnv = TypeEnv Map.empty
 
-lookupModule :: ModuleName -> TypeEnv -> Maybe TypeMap
-lookupModule modName = Map.lookup modName . typeEnvMap
+lookupModuleTypeMap :: ModuleName -> TypeEnv -> TypeMap
+lookupModuleTypeMap modName =
+    fromMaybe Map.empty . Map.lookup modName . typeEnvMap
 
 -- | Apply the given transformation to the corresponding module map.
 -- If there is no map for that module, it is created.
@@ -31,9 +30,14 @@ updateModule modName f =
     TypeEnv . Map.alter (Just . f . fromMaybe Map.empty) modName . typeEnvMap
 
 
+data MissingType
+    = MissingModule ModuleName
+    | MissingType (Qual TypeName)
+    deriving (Show, Eq)
+
 lookupType :: Qual TypeName -> TypeEnv -> Either MissingType Type
 lookupType qual env =
-    case lookupModule modName env of
+    case Map.lookup modName $ typeEnvMap env of
         Nothing -> Left $ MissingModule modName
         Just tmap -> case Map.lookup (rawName qual) tmap of
             Nothing -> Left $ MissingType qual

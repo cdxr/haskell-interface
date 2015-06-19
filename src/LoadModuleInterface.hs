@@ -5,6 +5,10 @@
 module LoadModuleInterface where
 
 import Control.Monad
+import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Class
+
+import qualified Data.Set as Set
 
 import GHC
 
@@ -24,9 +28,7 @@ import qualified TyCon
 import qualified Type
 import qualified Kind
 
-import Data.Interface.Source as Interface
-import Data.Interface.Type as Interface
-import Data.Interface.Module as Interface
+import Data.Interface as Interface
 
 import Debug.Trace
 
@@ -61,8 +63,9 @@ moduleInterfacesForTargets targets = do
     when (needsTemplateHaskell moduleGraph) $
         error "readModuleInterface: Template Haskell unsupported"  -- TODO
 
-    forM (listModSummaries moduleGraph) $
-        typecheckedModuleInterface <=< loadModSummary
+    withFreshTypeEnv $
+        forM (listModSummaries moduleGraph) $
+            makeModuleInterface <=< lift . (typecheckModule <=< parseModule)
   where
     -- Sort the modules topologically and discard hs-boot modules.
     -- The topological order is not currently used, but it will be
@@ -73,78 +76,89 @@ moduleInterfacesForTargets targets = do
     sortGraph :: ModuleGraph -> ModuleGraph
     sortGraph g = flattenSCCs $ topSortModuleGraph False g Nothing
 
-    loadModSummary :: ModSummary -> Ghc TypecheckedModule
-    loadModSummary = loadModule <=< typecheckModule <=< parseModule
+    withFreshTypeEnv :: (Monad m) => StateT TypeEnv m a -> m a
+    withFreshTypeEnv m = evalStateT m emptyTypeEnv
 
 
--- | Produce a `ModuleInterface` from a `GHC.TypecheckedModule`
-typecheckedModuleInterface :: TypecheckedModule -> Ghc ModuleInterface
-typecheckedModuleInterface typMod = do
-    exports <- mapM (nameToExport thisModule) (modInfoExports modInfo)
-    let instances = map makeClassInstance (modInfoInstances modInfo)
-    pure $ makeModuleInterface modName exports instances
+makeModuleInterface ::
+    (GhcMonad m) =>
+    GHC.TypecheckedModule -> StateT TypeEnv m ModuleInterface
+makeModuleInterface tcMod = do
+    _ <- lift $ loadModule tcMod
+
+    let modInfo = GHC.moduleInfo tcMod
+        thisMod = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
+        modName = makeModuleName thisMod
+
+    (exportList, valueDecls, typeDecls) <-
+        splitExports <$> mapM (loadExport modName) (modInfoExports modInfo)
+
+    instances <- mapM loadClassInstance $ modInfoInstances modInfo
+
+    typeMap <- gets $ lookupModuleTypeMap modName
+
+    pure ModuleInterface
+        { Interface.moduleName = modName
+        , moduleTypes = typeMap
+        , moduleValueDecls = nameMapFromList valueDecls
+        , moduleTypeDecls  = nameMapFromList typeDecls
+        , moduleExportList = exportList
+        , moduleInstances  = Set.fromList instances
+        }
   where
-    modInfo = moduleInfo typMod
-    modName = makeModuleName thisModule
-
-    thisModule :: GHC.Module
-    thisModule = ms_mod . pm_mod_summary . tm_parsed_module $ typMod
-
-    makeClassInstance :: ClsInst -> ClassInstance
-    makeClassInstance ci =
+    loadClassInstance ::
+        (Monad m) =>
+        GHC.ClsInst ->
+        StateT TypeEnv m ClassInstance
+    loadClassInstance ci = pure $  --TODO  load associated types into map
         ClassInstance (getOccString $ InstEnv.is_cls_nm ci)  -- class name
-                      (map makeType $ InstEnv.is_tys ci)     -- class kind
+                      (map makeType $ InstEnv.is_tys ci)     -- instance types
 
 
--- | Produce an `Export` from a `GHC.Interface` and a `GHC.Name` included in
--- that module's export list, distinguishing locally-defined
--- exports from re-exports.
---
--- This will fail if the Ghc environment cannot find the `Name`.
---
--- Note: this results in qualified names that refer to the original module,
--- rather than the imported module
---  (e.g. Data.List.foldr will appear as Data.Foldable.foldr)
-nameToExport :: GHC.Module -> GHC.Name -> Ghc Interface.Export
-nameToExport thisModule ghcName = do
-    Just (thing, _fixity, _, _) <- getInfo False ghcName
-    -- TODO: ^ handle this properly: if `name` is not in the GHC
-    --         environment, this will trigger an exception
-
-    let sdecl = thingToSomeDecl thing
-        nameMod = nameModule ghcName
-    
-    pure $ if nameMod /= thisModule
-        then Reexport $ makeQual nameMod (someDeclName sdecl)
-        else LocalExport sdecl
+loadExport ::
+    (GhcMonad m) =>
+    Interface.ModuleName -> GHC.Name -> StateT TypeEnv m Export
+loadExport thisModule ghcName = do
+    mTyThing <- lift $ GHC.lookupName ghcName
+    case mTyThing of
+        Nothing ->
+            error $ "loadExport: failed to find name " ++ showQualName q
+        Just thing
+            | qualModuleName q /= thisModule ->
+                pure . ReExport $ SomeName (tyThingNamespace thing) <$> q
+            | otherwise ->
+                makeLocalExport thing
+  where
+    q :: Qual RawName
+    q = makeQualName ghcName
 
 
--- TODO: type families
-thingToSomeDecl :: GHC.TyThing -> Interface.SomeDecl
-thingToSomeDecl thing = case thing of
-    ACoAxiom{} -> error "makeSomeDecl: ACoAxiom unimplemented"
+-- | TODO LOAD TYPE INFORMATION
+makeLocalExport :: (GhcMonad m) => GHC.TyThing -> StateT TypeEnv m Export
+makeLocalExport thing = case thing of
+    ACoAxiom{} -> error "makeLocalExport: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        mkValueDecl $ Value $ makeType (idType a)
+        pure $ mkValueDecl $ Value $ makeType (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        mkValueDecl $ makeDataCon dcon
+        pure $ mkValueDecl $ makeDataCon dcon
             -- DataCon (makeType $ dataConType dcon) (makeDataConList dcon)
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        mkValueDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
+        pure $ mkValueDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            mkTypeDecl $ TypeSyn kind $ unsafeOutput rhs
+            pure $ mkTypeDecl $ TypeSyn kind $ unsafeOutput rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            mkTypeDecl $ TypeClass kind
+            pure $ mkTypeDecl $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            mkTypeDecl $ Interface.DataType kind (makeDataConList tyCon)
+            pure $ mkTypeDecl $ Interface.DataType kind (makeDataConList tyCon)
       where
         kind = makeKind $ TyCon.tyConKind tyCon
   where
-    mkValueDecl :: ValueDecl -> SomeDecl
-    mkValueDecl = SomeValue . makeNamed thing
+    mkValueDecl :: ValueDecl -> Export
+    mkValueDecl = LocalValue . makeQualNamed thing
 
-    mkTypeDecl :: TypeDecl -> SomeDecl
-    mkTypeDecl = SomeType . makeNamed thing
+    mkTypeDecl :: TypeDecl -> Export
+    mkTypeDecl = LocalType . makeQualNamed thing
 
 
 makeDataCon :: GHC.DataCon -> ValueDecl
@@ -166,7 +180,9 @@ makeTypeCon tc
     | TyCon.isTypeSynonymTyCon tc =
         typeCon ConSynonym
     | TyCon.isFamInstTyCon tc =
-        error "makeTyconType: family instances not implemented"
+        error "makeTypeCon: family instances not implemented"
+    | otherwise =
+        error $ "makeTypeCon: unrecognized: " ++ unsafeOutput tc
 --  | isFunTyCon tc = 
 --  | isPrimTyCon tc = 
 --  | isTupleTyCon tc = 
@@ -223,18 +239,36 @@ makeKind k0 = case splitForAllTys k0 of
         | otherwise                 -> KindVar $ unsafeOutput k
 
 
+makeRawName :: (GHC.NamedThing n) => n -> RawName
+makeRawName = getOccString . GHC.getName
+
+
+tyThingNamespace :: GHC.TyThing -> Interface.Namespace
+tyThingNamespace tyThing = case tyThing of
+    AnId{}     -> Values
+    AConLike{} -> Values
+    ATyCon{}   -> Types
+    ACoAxiom{} -> Types
+
+
 makeNamed :: (GHC.NamedThing n) => n -> a -> Named a
-makeNamed n = Named (getOccString ghcName) (makeOrigin ghcName)
+makeNamed n = Named (makeRawName ghcName) (makeOrigin ghcName)
   where
     ghcName = GHC.getName n
 
 
-makeQual :: GHC.Module -> a -> Qual a
-makeQual = Interface.Qual . makeModuleName
+ghcNameModule :: GHC.Name -> Interface.ModuleName
+ghcNameModule = makeModuleName . GHC.nameModule
+
+
+makeQualName :: (GHC.NamedThing n) => n -> Qual RawName
+makeQualName n = Interface.Qual (ghcNameModule ghcName) (makeRawName ghcName)
+  where
+    ghcName = GHC.getName n
 
 
 makeQualNamed :: (GHC.NamedThing n) => n -> a -> Qual (Named a)
-makeQualNamed n = makeQual (GHC.nameModule ghcName) . makeNamed ghcName
+makeQualNamed n = Interface.Qual (ghcNameModule ghcName) . makeNamed ghcName
   where
     ghcName = GHC.getName n
 
