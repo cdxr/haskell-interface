@@ -9,23 +9,23 @@ import Data.Interface.Name
 import Data.Interface.Type.Type
 
 
-type TypeMap = Map RawName TypeCon
-
-
 newtype TypeEnv = TypeEnv
-    { typeEnvMap :: Map ModuleName TypeMap
+    { typeEnvMap :: Map ModuleName (NameMap TypeCon)
     } deriving (Show, Eq, Ord)
 
 emptyTypeEnv :: TypeEnv
 emptyTypeEnv = TypeEnv Map.empty
 
-lookupModuleTypeMap :: ModuleName -> TypeEnv -> TypeMap
-lookupModuleTypeMap modName =
+lookupModule :: ModuleName -> TypeEnv -> NameMap TypeCon
+lookupModule modName =
     fromMaybe Map.empty . Map.lookup modName . typeEnvMap
 
 -- | Apply the given transformation to the corresponding module map.
 -- If there is no map for that module, it is created.
-updateModule :: ModuleName -> (TypeMap -> TypeMap) ->  TypeEnv -> TypeEnv
+updateModule ::
+    ModuleName ->
+    (NameMap TypeCon -> NameMap TypeCon) ->
+    TypeEnv -> TypeEnv
 updateModule modName f =
     TypeEnv . Map.alter (Just . f . fromMaybe Map.empty) modName . typeEnvMap
 
@@ -46,9 +46,6 @@ lookupType qual env =
     modName = qualModuleName qual
 
 
-insertType :: Qual (Named TypeCon) -> TypeEnv -> TypeEnv
-insertType (Qual modName namedTree) =
-    updateModule modName $
-        Map.insert (rawName namedTree) (namedThing namedTree)
-
+insertType :: Qual TypeCon -> TypeEnv -> TypeEnv
+insertType (Qual modName typeCon) = updateModule modName $ insertNamed typeCon
 

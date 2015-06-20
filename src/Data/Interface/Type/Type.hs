@@ -5,24 +5,55 @@
 module Data.Interface.Type.Type where
 
 import Data.Interface.Name
+import Data.Interface.Source ( Origin )
 
 
 data Type
-    = Con (Qual (Named TypeCon))  -- ^ type constructors
+    = Con (Qual TypeCon)          -- ^ type constructors
     | Link (Qual TypeName)        -- ^ "links" to type constructors
     | Apply Type Type             -- ^ type constructor application
     | Fun Type Type               -- ^ (->) type constructor
     | Var TypeVar                 -- ^ type variables ("a")
     | Forall [TypeVar] Type       -- ^ forall qualifiers / constraints
+    | Context [Pred] Type         -- ^ class and equality predicates
     deriving (Show, Eq, Ord)
 
-type Constraint = Type
+
+-- | A class or equality predicate
+data Pred
+    = ClassPred (Qual RawName) [Type]          
+    | EqPred EqRel Type Type
+    deriving (Show, Eq, Ord)
+
+-- | A choice of equality relation. Copied from GHC.Type.
+data EqRel = NomEq | ReprEq
+    deriving (Show, Eq, Ord)
 
 
 applyType :: Type -> [Type] -> Type
 applyType t [] = t
 applyType t (t':ts) = Apply t t' `applyType` ts
 
+
+{- TODO: normalizeType:
+ -   It would be nice to have a representation geared towards convenient
+ -   construction, and `normalizeType` would return a different type that
+ -   was guaranteed to be in normalized form, and optimized for comparison
+ -   and display.
+ -
+ -   This might be a good place to scrap my boilerplate...
+ -}
+normalizeType :: Type -> Type
+normalizeType t0 = case t0 of
+    Context ps (Context ps' t) -> Context (ps ++ ps') $ normalizeType t
+    Context ps t -> Context ps $ normalizeType t
+    Forall vs (Forall vs' t) -> Forall (vs ++ vs') $ normalizeType t
+    Forall vs t -> Forall vs $ normalizeType t
+    Fun a b -> Fun (normalizeType a) (normalizeType b)
+    Apply a b -> Apply (normalizeType a) (normalizeType b)
+    Con{} -> t0
+    Link{} -> t0
+    Var{} -> t0
 
 
 data TypeVar = TypeVar String Kind
@@ -35,17 +66,27 @@ varKind :: TypeVar -> Kind
 varKind (TypeVar _ k) = k
 
 
-data TypeCon = TypeCon TypeConInfo Kind
-    deriving (Show, Eq, Ord)
+data TypeCon = TypeCon
+    { typeConName   :: RawName
+    , typeConOrigin :: Origin
+    , typeConKind   :: Kind
+    , typeConIntro  :: TypeConIntro
+    } deriving (Show, Eq, Ord)
 
 -- | The introducer of a type constructor
-data TypeConInfo
+data TypeConIntro
     = ConAlgebraic   -- ^ data/newtype declaration
     | ConSynonym     -- ^ type synonym
     | ConClass       -- ^ class declaration
     deriving (Show, Eq, Ord)
 
 type instance Space TypeCon = 'Types
+
+instance HasRawName TypeCon where
+    rawName = typeConName
+
+instance HasNamespace TypeCon where
+    namespace _ = Types
 
 
 

@@ -17,6 +17,7 @@ import Data.Interface.Change
 
 import ProgramArgs
 import Format
+import Render
 
 
 main :: IO ()
@@ -48,13 +49,18 @@ prepareModuleDiff args = do
 
 
 dumpModuleInterface :: ModuleInterface -> IO ()
-dumpModuleInterface modIf = do
-    putStr $ unlines
-        [ ""
-        , "*** Dumping ModuleInterface ***"
-        , "Name: " ++ moduleName modIf
-        ]
+dumpModuleInterface iface = do
+    putStrLn $ "\n*** Module: " ++ moduleName iface ++ " ***\n"
 
+    let render a = printRenderTree (indent 2) a >> putStrLn ""
+
+    putStrLn "Exposed type constructors:\n"
+    forM_ (moduleTypes iface) $ render . renderTypeCon
+
+    putStrLn "Module exports:\n"
+    forM_ (moduleExports iface) $ render . renderExport
+
+{-
     mapM_ (printFormatTree 2)
         [ makeNode "Values:"    $ moduleValueDecls modIf
         , makeNode "Types:"     $ moduleTypeDecls modIf
@@ -64,6 +70,7 @@ dumpModuleInterface modIf = do
   where
     makeNode :: (Foldable f, Format a) => String -> f a -> FormatTree
     makeNode lbl = formatNode lbl . map format . toList
+-}
 
 
 

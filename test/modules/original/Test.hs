@@ -77,7 +77,7 @@ makeList = []
 
 
 class LocalClass a where
-    localClassValue :: a
+    localClassValue :: (Show a) => a
 
 instance LocalClass FooTypeCon where
     localClassValue = foo

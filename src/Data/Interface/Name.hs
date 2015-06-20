@@ -187,6 +187,9 @@ type NameMap = Map RawName
 nameMapFromList :: (HasRawName a) => [a] -> NameMap a
 nameMapFromList = Map.fromList . map (\x -> (rawName x, x))
 
+insertNamed :: (HasRawName a) => a -> NameMap a -> NameMap a
+insertNamed a = Map.insert (rawName a) a
+
 lookupName :: (HasName s n, HasName s a) => n -> NameMap a -> Maybe a
 lookupName = Map.lookup . rawName
 {-# INLINABLE lookupName #-}

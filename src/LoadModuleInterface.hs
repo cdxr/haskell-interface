@@ -128,7 +128,7 @@ makeModuleInterface tcMod = do
 
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
 
-    typeMap <- withTypeEnv $ gets $ lookupModuleTypeMap modName
+    typeMap <- withTypeEnv $ gets (Interface.lookupModule modName)
 
     pure ModuleInterface
         { Interface.moduleName = modName
@@ -182,54 +182,82 @@ makeLocalExport thing = case thing of
       where
         kind = makeKind $ TyCon.tyConKind tyCon
   where
+    thingName = GHC.getName thing
+
     mkValueDecl :: ValueDecl -> Export
-    mkValueDecl = LocalValue . makeQualNamed thing
+    mkValueDecl = LocalValue . makeQualNamed thingName
 
     mkTypeDecl :: GHC.TyCon -> TypeDecl -> LoadModule Export
     mkTypeDecl tyCon typeDecl = do
-        let q = makeQualNamed thing typeDecl
+        let q = makeQualNamed thingName typeDecl
         
         pure $ LocalType q
 
 
 -- | Construct a `Interface.Type` to be included in a `ModuleInterface`.
 makeType :: GHC.Type -> LoadModule Interface.Type
-makeType t0 = case splitForAllTys t0 of
-    ([], t)
-        | Just tyVar <- Type.getTyVar_maybe t ->
-            pure $ Var $ makeTypeVar tyVar
-        | Just (ta, tb) <- Type.splitFunTy_maybe t ->
-            Fun <$> makeType ta <*> makeType tb
-        | Just (ta, tb) <- Type.splitAppTy_maybe t ->
-            Apply <$> makeType ta <*> makeType tb
-        | Just (tc, ts) <- Type.splitTyConApp_maybe t -> do
-            -- if thisModule /= moduleOf tc
-            --   then makelink tc
-            --   else:
-
-            -- TODO: type constructors that do not originate in the current
-            -- module should not be constructed with `makeTypeCon`:
-            -- they should be links
-            typeCon <- makeTypeCon tc
-            applyType (Con typeCon) <$> mapM makeType ts
-        | otherwise -> do
-            s <- pprGHC t
-            fail $ "makeType: " ++ s
-        -- TODO: numeric and string literals
-    (vs, t) ->
-        Forall (map makeTypeVar vs) <$> makeType t
+makeType = fmap normalizeType . go
   where
+    go t0 = case splitForAllTys t0 of
+        ([], t)
+            | Just tyVar <- Type.getTyVar_maybe t ->
+                pure $ Var $ makeTypeVar tyVar
+            | Just (ta, tb) <- Type.splitFunTy_maybe t ->
+                if Type.isPredTy ta
+                    then Context <$> makePreds ta <*> go tb
+                    else Fun <$> go ta <*> go tb
+            | Just (ta, tb) <- Type.splitAppTy_maybe t ->
+                Apply <$> go ta <*> go tb
+            | Just (tc, ts) <- Type.splitTyConApp_maybe t -> do
+                -- TODO: type constructors that do not originate in the current
+                -- module should not be constructed with `makeTypeCon`:
+                -- they should be links
+                typeCon <- makeTypeCon tc
+                applyType (Con typeCon) <$> mapM go ts
+            | otherwise -> do
+                s <- pprGHC t
+                fail $ "makeType: " ++ s
+            -- TODO: numeric and string literals
+        (vs, t) ->
+            Forall (map makeTypeVar vs) <$> go t
+
     makeTypeVar :: GHC.TyVar -> TypeVar
     makeTypeVar tyVar =
         TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
 
 
+-- | Construct a list of type predicates from a `GHC.PredType`
+makePreds :: GHC.PredType -> LoadModule [Pred]
+makePreds pt = case Type.classifyPredType pt of
+    Type.ClassPred cls ts ->
+        sequence
+            [ Interface.ClassPred (makeQualName $ GHC.getName cls)
+                <$> mapM makeType ts ]
+    Type.EqPred rel a b ->
+        sequence
+            [ Interface.EqPred (makeEqRel rel) <$> makeType a <*> makeType b ]
+    Type.TuplePred ps -> concat <$> mapM makePreds ps
+    Type.IrredPred p ->
+        error $ "makeTypes: IrredPred: " ++ unsafeOutput p
+  where
+    makeEqRel :: Type.EqRel -> Interface.EqRel
+    makeEqRel r = case r of
+        Type.NomEq  -> Interface.NomEq
+        Type.ReprEq -> Interface.ReprEq
+
+
 -- | Construct a `TypeCon` to be included in a `ModuleInterface`, and add it
 -- to the `TypeEnv` when it originates in the current module.
-makeTypeCon :: GHC.TyCon -> LoadModule (Qual (Named Interface.TypeCon))
+makeTypeCon :: GHC.TyCon -> LoadModule (Qual Interface.TypeCon)
 makeTypeCon ghcTyCon = do
-    typeCon <- TypeCon <$> info <*> pure kind
-    let namedCon = makeQualNamed ghcTyCon typeCon
+    let ghcName = GHC.getName ghcTyCon
+    typeCon <-
+        TypeCon (makeRawName ghcName) (makeOrigin ghcName) kind <$> info
+
+    -- traceM $ "TRACE makeTypeCon: " ++ show typeCon
+
+    let namedCon = makeQual ghcName typeCon
+
     withTypeEnv $ namedCon <$ do
         let name = Interface.getQualName namedCon
         mStoredCon <- gets $ lookupType name
@@ -262,6 +290,7 @@ makeTypeCon ghcTyCon = do
         | otherwise = do
             s <- pprGHC ghcTyCon
             fail $ "makeTypeCon: unrecognized: " ++ s
+
     --  | isFunTyCon tc = 
     --  | isPrimTyCon tc = 
     --  | isTupleTyCon tc = 
@@ -321,17 +350,16 @@ makeNamed n = Named (makeRawName ghcName) (makeOrigin ghcName)
 ghcNameModule :: GHC.Name -> Interface.ModuleName
 ghcNameModule = makeModuleName . GHC.nameModule
 
-
-makeQualName :: (GHC.NamedThing n) => n -> Qual RawName
-makeQualName n = Interface.Qual (ghcNameModule ghcName) (makeRawName ghcName)
-  where
-    ghcName = GHC.getName n
+makeQual :: GHC.Name -> a -> Qual a
+makeQual = Interface.Qual . ghcNameModule
 
 
-makeQualNamed :: (GHC.NamedThing n) => n -> a -> Qual (Named a)
-makeQualNamed n = Interface.Qual (ghcNameModule ghcName) . makeNamed ghcName
-  where
-    ghcName = GHC.getName n
+makeQualName :: GHC.Name -> Qual RawName
+makeQualName n = makeQual n (makeRawName n)
+
+
+makeQualNamed :: GHC.Name -> a -> Qual (Named a)
+makeQualNamed n = makeQual n . makeNamed n
 
 
 makeOrigin :: GHC.Name -> Origin
