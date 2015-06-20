@@ -1,6 +1,4 @@
-{-| This is a temporary module that uses GHC to construct `ModuleInterface`
-    values. All interaction with GHC is currently encapsulated in this module.
- -}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module LoadModuleInterface where
 
@@ -8,11 +6,14 @@ import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
+import Control.Arrow ( second )
 import qualified Data.Set as Set
 
 import GHC
 
 import qualified GHC.Paths
+
+import DynFlags ( getDynFlags )
 
 import Name ( getOccString )
 import Digraph ( flattenSCCs )
@@ -63,9 +64,9 @@ moduleInterfacesForTargets targets = do
     when (needsTemplateHaskell moduleGraph) $
         error "readModuleInterface: Template Haskell unsupported"  -- TODO
 
-    withFreshTypeEnv $
+    runLoadMod $
         forM (listModSummaries moduleGraph) $
-            makeModuleInterface <=< lift . (typecheckModule <=< parseModule)
+            makeModuleInterface <=< liftGHC . (typecheckModule <=< parseModule)
   where
     -- Sort the modules topologically and discard hs-boot modules.
     -- The topological order is not currently used, but it will be
@@ -80,22 +81,54 @@ moduleInterfacesForTargets targets = do
     withFreshTypeEnv m = evalStateT m emptyTypeEnv
 
 
-makeModuleInterface ::
-    (GhcMonad m) =>
-    GHC.TypecheckedModule -> StateT TypeEnv m ModuleInterface
+-- * LoadModule
+
+newtype LoadModule a = LoadModule
+    { loadModState :: StateT (TypeEnv, Interface.ModuleName) Ghc a
+    } deriving (Functor, Applicative, Monad)
+
+runLoadMod :: LoadModule a -> Ghc a
+runLoadMod (LoadModule m) = evalStateT m (emptyTypeEnv, "")
+
+liftGHC :: Ghc a -> LoadModule a
+liftGHC = LoadModule . lift
+
+pprGHC :: (Out.Outputable a) => a -> LoadModule String
+pprGHC a = do
+    dflags <- liftGHC getDynFlags
+    pure $ Out.showPpr dflags a
+
+withTypeEnv :: State TypeEnv a -> LoadModule a
+withTypeEnv m = LoadModule $ do
+    (te0, mn0) <- get
+    let (a, te) = runState m te0
+    a <$ put (te, mn0)
+    
+setCurrentModule :: Interface.ModuleName -> LoadModule ()
+setCurrentModule name = LoadModule $ modify $ second (\_ -> name)
+
+getCurrentModule :: LoadModule Interface.ModuleName
+getCurrentModule = LoadModule $ gets snd
+
+
+-- * Building ModuleInterfaces
+
+makeModuleInterface :: GHC.TypecheckedModule -> LoadModule ModuleInterface
 makeModuleInterface tcMod = do
-    _ <- lift $ loadModule tcMod
+    _ <- liftGHC $ loadModule tcMod
 
     let modInfo = GHC.moduleInfo tcMod
         thisMod = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
         modName = makeModuleName thisMod
 
+    setCurrentModule modName
+
     (exportList, valueDecls, typeDecls) <-
-        splitExports <$> mapM (loadExport modName) (modInfoExports modInfo)
+        splitExports <$> mapM loadExport (modInfoExports modInfo)
 
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
 
-    typeMap <- gets $ lookupModuleTypeMap modName
+    typeMap <- withTypeEnv $ gets $ lookupModuleTypeMap modName
 
     pure ModuleInterface
         { Interface.moduleName = modName
@@ -106,20 +139,16 @@ makeModuleInterface tcMod = do
         , moduleInstances  = Set.fromList instances
         }
   where
-    loadClassInstance ::
-        (Monad m) =>
-        GHC.ClsInst ->
-        StateT TypeEnv m ClassInstance
-    loadClassInstance ci = pure $  --TODO  load associated types into map
+    loadClassInstance :: GHC.ClsInst -> LoadModule ClassInstance
+    loadClassInstance ci =
         ClassInstance (getOccString $ InstEnv.is_cls_nm ci)  -- class name
-                      (map makeType $ InstEnv.is_tys ci)     -- instance types
+            <$> mapM makeType (InstEnv.is_tys ci)            -- instance types
 
 
-loadExport ::
-    (GhcMonad m) =>
-    Interface.ModuleName -> GHC.Name -> StateT TypeEnv m Export
-loadExport thisModule ghcName = do
-    mTyThing <- lift $ GHC.lookupName ghcName
+loadExport :: GHC.Name -> LoadModule Export
+loadExport ghcName = do
+    thisModule <- getCurrentModule
+    mTyThing <- liftGHC $ GHC.lookupName ghcName
     case mTyThing of
         Nothing ->
             error $ "loadExport: failed to find name " ++ showQualName q
@@ -133,65 +162,120 @@ loadExport thisModule ghcName = do
     q = makeQualName ghcName
 
 
--- | TODO LOAD TYPE INFORMATION
-makeLocalExport :: (GhcMonad m) => GHC.TyThing -> StateT TypeEnv m Export
+makeLocalExport :: GHC.TyThing -> LoadModule Export
 makeLocalExport thing = case thing of
     ACoAxiom{} -> error "makeLocalExport: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        pure $ mkValueDecl $ Value $ makeType (idType a)
+        mkValueDecl . Value <$> makeType (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        pure $ mkValueDecl $ makeDataCon dcon
+        mkValueDecl <$> makeDataCon dcon
             -- DataCon (makeType $ dataConType dcon) (makeDataConList dcon)
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        pure $ mkValueDecl $ PatternSyn $ makeType $ PatSyn.patSynType patsyn
+        mkValueDecl . PatternSyn <$> makeType (PatSyn.patSynType patsyn)
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            pure $ mkTypeDecl $ TypeSyn kind $ unsafeOutput rhs
+            mkTypeDecl tyCon . TypeSyn kind =<< pprGHC rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            pure $ mkTypeDecl $ TypeClass kind
+            mkTypeDecl tyCon $ TypeClass kind
         | otherwise ->                              -- data/newtype/other
-            pure $ mkTypeDecl $ Interface.DataType kind (makeDataConList tyCon)
+            mkTypeDecl tyCon $ Interface.DataType kind (makeDataConList tyCon)
       where
         kind = makeKind $ TyCon.tyConKind tyCon
   where
     mkValueDecl :: ValueDecl -> Export
     mkValueDecl = LocalValue . makeQualNamed thing
 
-    mkTypeDecl :: TypeDecl -> Export
-    mkTypeDecl = LocalType . makeQualNamed thing
+    mkTypeDecl :: GHC.TyCon -> TypeDecl -> LoadModule Export
+    mkTypeDecl tyCon typeDecl = do
+        let q = makeQualNamed thing typeDecl
+        
+        pure $ LocalType q
 
 
-makeDataCon :: GHC.DataCon -> ValueDecl
-makeDataCon dcon = DataCon (makeType ghcType) fields
+-- | Construct a `Interface.Type` to be included in a `ModuleInterface`.
+makeType :: GHC.Type -> LoadModule Interface.Type
+makeType t0 = case splitForAllTys t0 of
+    ([], t)
+        | Just tyVar <- Type.getTyVar_maybe t ->
+            pure $ Var $ makeTypeVar tyVar
+        | Just (ta, tb) <- Type.splitFunTy_maybe t ->
+            Fun <$> makeType ta <*> makeType tb
+        | Just (ta, tb) <- Type.splitAppTy_maybe t ->
+            Apply <$> makeType ta <*> makeType tb
+        | Just (tc, ts) <- Type.splitTyConApp_maybe t -> do
+            -- if thisModule /= moduleOf tc
+            --   then makelink tc
+            --   else:
+
+            -- TODO: type constructors that do not originate in the current
+            -- module should not be constructed with `makeTypeCon`:
+            -- they should be links
+            typeCon <- makeTypeCon tc
+            applyType (Con typeCon) <$> mapM makeType ts
+        | otherwise -> do
+            s <- pprGHC t
+            fail $ "makeType: " ++ s
+        -- TODO: numeric and string literals
+    (vs, t) ->
+        Forall (map makeTypeVar vs) <$> makeType t
+  where
+    makeTypeVar :: GHC.TyVar -> TypeVar
+    makeTypeVar tyVar =
+        TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
+
+
+-- | Construct a `TypeCon` to be included in a `ModuleInterface`, and add it
+-- to the `TypeEnv` when it originates in the current module.
+makeTypeCon :: GHC.TyCon -> LoadModule (Qual (Named Interface.TypeCon))
+makeTypeCon ghcTyCon = do
+    typeCon <- TypeCon <$> info <*> pure kind
+    let namedCon = makeQualNamed ghcTyCon typeCon
+    withTypeEnv $ namedCon <$ do
+        let name = Interface.getQualName namedCon
+        mStoredCon <- gets $ lookupType name
+        case mStoredCon of
+            Left _ ->  -- the type constructor is not stored yet: add it
+                modify $ insertType namedCon
+            Right storedCon
+                | storedCon /= typeCon ->
+                    fail $ "makeTypeCon: type constructor does not match the"
+                        ++ " one in TypeEnv: " ++ showQualName name
+                {- TODO: ^ This asserts that the now-created type constructor is
+                   the same as the one stored in the TypeEnv.
+                   They should _always_ be the same, and this will later be
+                   removed.
+                -}
+                | otherwise -> pure ()
+  where
+    kind = makeKind $ TyCon.tyConKind ghcTyCon
+
+    info
+        | Just _cls <- TyCon.tyConClass_maybe ghcTyCon =
+            pure ConClass
+        | TyCon.isAlgTyCon ghcTyCon =
+            pure ConAlgebraic
+        | TyCon.isTypeSynonymTyCon ghcTyCon =
+            pure ConSynonym
+        -- TODO: type family instances
+        | TyCon.isFamInstTyCon ghcTyCon =
+            fail "makeTypeCon: family instances not implemented"
+        | otherwise = do
+            s <- pprGHC ghcTyCon
+            fail $ "makeTypeCon: unrecognized: " ++ s
+    --  | isFunTyCon tc = 
+    --  | isPrimTyCon tc = 
+    --  | isTupleTyCon tc = 
+    --  | isUnboxedTupleTyCon tc = 
+    --  | isBoxedTupleTyCon tc = 
+    --  | isPromotedDataCon tc = 
+
+
+makeDataCon :: GHC.DataCon -> LoadModule ValueDecl
+makeDataCon dcon = DataCon <$> makeType ghcType <*> pure fields
   where
     ghcType = dataConType dcon
     fields = map mkField (dataConFieldLabels dcon)
     mkField lbl = makeNamed lbl ()
-
-
--- TODO: type family instances
-makeTypeCon :: GHC.TyCon -> Interface.TypeCon
-makeTypeCon tc
-    | Just _cls <- TyCon.tyConClass_maybe tc =
-        typeCon ConClass
-        --Dict [makeClass cls]
-    | TyCon.isAlgTyCon tc   =
-        typeCon ConAlgebraic
-    | TyCon.isTypeSynonymTyCon tc =
-        typeCon ConSynonym
-    | TyCon.isFamInstTyCon tc =
-        error "makeTypeCon: family instances not implemented"
-    | otherwise =
-        error $ "makeTypeCon: unrecognized: " ++ unsafeOutput tc
---  | isFunTyCon tc = 
---  | isPrimTyCon tc = 
---  | isTupleTyCon tc = 
---  | isUnboxedTupleTyCon tc = 
---  | isBoxedTupleTyCon tc = 
---  | isPromotedDataCon tc = 
-  where
-    typeCon info = TypeCon info kind
-    kind = makeKind $ TyCon.tyConKind tc
 
 
 makeDataConList :: GHC.TyCon -> DataConList
@@ -201,29 +285,6 @@ makeDataConList tc
   where
     mkDataCon :: GHC.DataCon -> Named ()
     mkDataCon dc = makeNamed dc ()
-
-
--- TODO: numeric and string literals
-makeType :: GHC.Type -> Interface.Type
-makeType t0 = case splitForAllTys t0 of
-    ([], t)
-        | Just tyVar <- Type.getTyVar_maybe t ->
-            Var $ makeTypeVar tyVar
-        | Just (ta, tb) <- Type.splitFunTy_maybe t ->
-            Fun (makeType ta) (makeType tb)
-        | Just (ta, tb) <- Type.splitAppTy_maybe t ->
-            Apply (makeType ta) (makeType tb)
-        | Just (tc, ts) <- Type.splitTyConApp_maybe t ->
-            applyType (Con $ makeQualNamed tc $ makeTypeCon tc)
-                      (map makeType ts)
-        | otherwise ->
-            error $ "makeType: " ++ unsafeOutput t
-    (vs, t) ->
-        Forall (map makeTypeVar vs) (makeType t)
-  where
-    makeTypeVar :: GHC.TyVar -> TypeVar
-    makeTypeVar tyVar =
-        TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
 
 
 -- TODO: promoted types
@@ -299,6 +360,7 @@ makeOrigin ghcName = case nameSrcSpan ghcName of
 -- __All uses of this function are temporary placeholders.__
 unsafeOutput :: (Out.Outputable a) => a -> String
 unsafeOutput = Out.showSDocUnsafe . Out.ppr
+
 
 
 makeModuleName :: GHC.Module -> Interface.ModuleName

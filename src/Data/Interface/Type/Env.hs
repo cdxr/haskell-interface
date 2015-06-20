@@ -9,7 +9,7 @@ import Data.Interface.Name
 import Data.Interface.Type.Type
 
 
-type TypeMap = Map RawName Type
+type TypeMap = Map RawName TypeCon
 
 
 newtype TypeEnv = TypeEnv
@@ -35,17 +35,18 @@ data MissingType
     | MissingType (Qual TypeName)
     deriving (Show, Eq)
 
-lookupType :: Qual TypeName -> TypeEnv -> Either MissingType Type
+lookupType :: Qual TypeName -> TypeEnv -> Either MissingType TypeCon
 lookupType qual env =
     case Map.lookup modName $ typeEnvMap env of
         Nothing -> Left $ MissingModule modName
         Just tmap -> case Map.lookup (rawName qual) tmap of
             Nothing -> Left $ MissingType qual
-            Just t  -> Right $ t
+            Just t  -> Right t
   where
     modName = qualModuleName qual
 
-insertType :: Qual (Named Type) -> TypeEnv -> TypeEnv
+
+insertType :: Qual (Named TypeCon) -> TypeEnv -> TypeEnv
 insertType (Qual modName namedTree) =
     updateModule modName $
         Map.insert (rawName namedTree) (namedThing namedTree)

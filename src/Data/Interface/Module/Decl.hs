@@ -5,11 +5,7 @@
 -}
 module Data.Interface.Module.Decl
  (
-    SomeDecl(..)
-  , someDeclName
-
-  , Type
-  , ValueDecl(..)
+    ValueDecl(..)
   , typeOf
   , DataField
 
@@ -38,8 +34,10 @@ typeOf vd = case vd of
     PatternSyn t -> t
     DataCon t _ -> t
 
+
+type instance Space ValueDecl = 'Values
+
 instance HasNamespace ValueDecl where
-    type Space ValueDecl = 'Just 'Values
     namespace _ = Values
 
 
@@ -63,8 +61,10 @@ kindOf td = case td of
     TypeSyn k _  -> k
     TypeClass k  -> k
 
+
+type instance Space TypeDecl = 'Types
+
 instance HasNamespace TypeDecl where
-    type Space TypeDecl = 'Just 'Types
     namespace _ = Types
 
 
@@ -74,6 +74,7 @@ data DataConList = Abstract | DataConList [Named ()]
     deriving (Show, Eq, Ord)
 
 
+{-
 data SomeDecl
     = SomeValue !(Named ValueDecl)
     | SomeType  !(Named TypeDecl)
@@ -97,3 +98,4 @@ instance HasNamespace SomeDecl where
     namespace SomeType{}  = Types
 
 instance HasSomeName SomeDecl where
+-}

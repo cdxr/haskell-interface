@@ -63,34 +63,34 @@ showQualName :: (HasRawName n) => Qual n -> String
 showQualName (Qual modName n) = modName ++ '.' : rawName n
 
 
--- * Name classes
+-- * Type families and typeclasses
 
+-- | Family of types that have an associated namespace.
+type family Space n :: Namespace
+
+type instance Space (Name s) = s
+type instance Space (Qual n) = Space n
+type instance Space (Named a) = Space a
+
+
+-- | Class of types that encode a namespace.
 class HasNamespace n where
-    -- | @Just@ the statically-known namespace, or @Nothing@ if the namespace
-    -- is not determined by the type.
-    type Space n :: Maybe Namespace
-
     -- | The namespace associated with a particular value.
+    -- If @Space n@ is defined, then @namespace x@ is a constant for all 
+    -- @x :: n@ and @Space n@ is the promoted value of @namespace x@.
     namespace :: n -> Namespace
 
-instance HasNamespace (Name 'Values) where
-    type Space (Name 'Values) = 'Just 'Values
 
+instance HasNamespace (Name 'Values) where
     namespace _ = Values
 
 instance HasNamespace (Name 'Types) where
-    type Space (Name 'Types) = 'Just 'Types
-
     namespace _ = Types
 
 instance HasNamespace SomeName where
-    type Space SomeName = 'Nothing
-
     namespace (SomeName s _) = s
 
 instance (HasNamespace n) => HasNamespace (Qual n) where
-    type Space (Qual n) = Space n
-
     namespace (Qual _ n) = namespace n
 
 
@@ -134,11 +134,15 @@ instance (HasSomeName n) => HasSomeName (Qual n) where
 
 
 -- | If @n@ has a `RawName` and determines a namespace @s@, it has a @Name s@.
-type (HasName s n) = (HasRawName n, Space n ~ 'Just s)
+type (HasName s n) = (HasRawName n, Space n ~ s)
 
 getName :: (HasName s n) => n -> Name s
 getName = coerce . rawName
 {-# INLINABLE getName #-}
+
+getQualName :: (HasName s n) => Qual n -> Qual (Name s)
+getQualName = fmap getName
+{-# INLINABLE getQualName #-}
 
 
 -- * Named
@@ -156,7 +160,6 @@ instance HasRawName (Named a) where
     rawName (Named n _ _) = n
 
 instance HasNamespace a => HasNamespace (Named a) where
-    type Space (Named a) = Space a
     namespace (Named _ _ a) = namespace a
 
 instance HasNamespace a => HasSomeName (Named a) where

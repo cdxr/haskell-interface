@@ -60,10 +60,7 @@ instance Format Type where
 
 instance Format Kind where
     format k = 
-        Node "[Kind]"
-            --[ pure $ "show: " ++ show k
-            [ pure $ "render: " ++ showKind k
-            ]
+        Node ("[Kind]  " ++ showKind k) []
 
 instance Format ValueDecl where
     format vd =

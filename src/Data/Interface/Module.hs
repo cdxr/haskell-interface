@@ -34,7 +34,7 @@ import Data.Interface.Module.Decl
 -- when examining differences between module versions.
 data ModuleInterface = ModuleInterface
     { moduleName       :: !ModuleName
-    , moduleTypes      :: !(Map RawName Type)
+    , moduleTypes      :: !(Map RawName TypeCon)
     , moduleValueDecls :: !(Map RawName (Named ValueDecl))
     , moduleTypeDecls  :: !(Map RawName (Named TypeDecl))
     , moduleExportList :: ![ExportName]

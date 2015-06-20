@@ -1,4 +1,6 @@
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds #-}
 
 module Data.Interface.Type.Type where
 
@@ -6,12 +8,11 @@ import Data.Interface.Name
 
 
 data Type
-    = Var TypeVar                 -- ^ type variables ("a")
---  | Wired WiredType             -- ^ built-in types (Bool, Eq)
-    | Con (Qual (Named TypeCon))  -- ^ type constructors
+    = Con (Qual (Named TypeCon))  -- ^ type constructors
     | Link (Qual TypeName)        -- ^ "links" to type constructors
     | Apply Type Type             -- ^ type constructor application
     | Fun Type Type               -- ^ (->) type constructor
+    | Var TypeVar                 -- ^ type variables ("a")
     | Forall [TypeVar] Type       -- ^ forall qualifiers / constraints
     deriving (Show, Eq, Ord)
 
@@ -43,6 +44,9 @@ data TypeConInfo
     | ConSynonym     -- ^ type synonym
     | ConClass       -- ^ class declaration
     deriving (Show, Eq, Ord)
+
+type instance Space TypeCon = 'Types
+
 
 
 type Arity = Int
