@@ -117,7 +117,6 @@ renderType qc = go
     go t0 = case t0 of
         Var (TypeVar s k) -> pure s
         Con qual -> pure $ resolveQual qc qual
-        Link qual -> pure $ resolveQual qc qual
         Apply{} -> 
             let tcon : params = flattenApply t0
             in Node (pprintType qc tcon) (map go params)

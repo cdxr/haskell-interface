@@ -9,14 +9,21 @@ import Data.Interface.Source ( Origin )
 
 
 data Type
-    = Con (Qual TypeCon)          -- ^ type constructors
-    | Link (Qual TypeName)        -- ^ "links" to type constructors
+    = Con TypeConLink             -- ^ type constructors
     | Apply Type Type             -- ^ type constructor application
     | Fun Type Type               -- ^ (->) type constructor
     | Var TypeVar                 -- ^ type variables ("a")
     | Forall [TypeVar] Type       -- ^ forall qualifiers / constraints
     | Context [Pred] Type         -- ^ class and equality predicates
     deriving (Show, Eq, Ord)
+
+-- | A "link" to a type constructor.
+--
+-- When performing diff analysis for a type, identical TypeConLinks indicate
+-- a form of "shallow" type equality. Depending on the origin of the links,
+-- it may be desirable to look up the TypeCon referenced by the link in order
+-- to measure "deep" type equality.
+type TypeConLink = Qual RawName
 
 
 -- | A class or equality predicate
@@ -52,7 +59,6 @@ normalizeType t0 = case t0 of
     Fun a b -> Fun (normalizeType a) (normalizeType b)
     Apply a b -> Apply (normalizeType a) (normalizeType b)
     Con{} -> t0
-    Link{} -> t0
     Var{} -> t0
 
 

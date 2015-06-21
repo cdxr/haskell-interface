@@ -15,9 +15,10 @@ import qualified GHC.Paths
 
 import DynFlags ( getDynFlags )
 
-import Name ( getOccString )
+import qualified Name
 import Digraph ( flattenSCCs )
 import HscTypes ( isBootSummary )
+import UniqSet
 import qualified ConLike
 import qualified PatSyn
 import qualified Outputable as Out
@@ -83,12 +84,24 @@ moduleInterfacesForTargets targets = do
 
 -- * LoadModule
 
-newtype LoadModule a = LoadModule
-    { loadModState :: StateT (TypeEnv, Interface.ModuleName) Ghc a
-    } deriving (Functor, Applicative, Monad)
+data LoadModuleState = LMS
+    { lmsTypeEnv       :: TypeEnv
+        -- ^ type constructors from previously-loaded modules
+    , lmsCurrentModule :: Maybe GHC.Module
+        -- ^ the module that we are currently modeling an interface for
+    , lmsExposedTyCons :: UniqSet GHC.TyCon
+        -- ^ exposed type constructors that we have encountered so far
+    }
+
+initLMState :: LoadModuleState
+initLMState = LMS emptyTypeEnv Nothing emptyUniqSet
+
+
+newtype LoadModule a = LoadModule (StateT LoadModuleState Ghc a)
+    deriving (Functor, Applicative, Monad)
 
 runLoadMod :: LoadModule a -> Ghc a
-runLoadMod (LoadModule m) = evalStateT m (emptyTypeEnv, "")
+runLoadMod (LoadModule m) = evalStateT m initLMState
 
 liftGHC :: Ghc a -> LoadModule a
 liftGHC = LoadModule . lift
@@ -100,15 +113,47 @@ pprGHC a = do
 
 withTypeEnv :: State TypeEnv a -> LoadModule a
 withTypeEnv m = LoadModule $ do
-    (te0, mn0) <- get
+    te0 <- gets lmsTypeEnv
     let (a, te) = runState m te0
-    a <$ put (te, mn0)
+    a <$ modify (\lms -> lms {lmsTypeEnv = te})
     
-setCurrentModule :: Interface.ModuleName -> LoadModule ()
-setCurrentModule name = LoadModule $ modify $ second (\_ -> name)
+-- | Set the module target for constructing a module interface. This resets
+-- all state information pertaining to the previous module.
+setTargetModule :: GHC.Module -> LoadModule ()
+setTargetModule ghcModule =
+    LoadModule $ modify $ \lms ->
+        lms { lmsCurrentModule = Just ghcModule
+            , lmsExposedTyCons = emptyUniqSet
+            }
 
-getCurrentModule :: LoadModule Interface.ModuleName
-getCurrentModule = LoadModule $ gets snd
+-- | Determine if the given named entity is defined in the current target
+-- module.
+isLocal :: (GHC.NamedThing a) => a -> LoadModule Bool
+isLocal a = LoadModule $ do
+    mGhcModule <- gets lmsCurrentModule
+    pure $ case mGhcModule of
+        Nothing -> False      -- without a module, there are no "local" names
+        Just{} -> Name.nameModule_maybe (GHC.getName a) == mGhcModule
+
+-- | Mark a `GHC.TyCon` as "seen", and create a `TypeConLink` that can be
+-- used to construct a `Type`. 
+--
+-- After the module interface has been loaded, the `LoadModuleState` contains
+-- a list of all encountered type constructors since the last call to
+-- `setTargetModule`.
+--
+linkTyCon :: GHC.TyCon -> LoadModule TypeConLink
+linkTyCon tyCon = do
+    LoadModule $ modify $ \lms ->
+        lms { lmsExposedTyCons = addOneToUniqSet (lmsExposedTyCons lms) tyCon }
+    pure $ makeQualName $ GHC.getName tyCon
+
+
+-- | Produce a list of every `GHC.TyCon` that has been "linked" since the
+-- previous call to `setTargetModule`. See `linkTyCon`.
+seenLocalTyCons :: LoadModule [GHC.TyCon]
+seenLocalTyCons =
+    filterM isLocal . uniqSetToList =<< LoadModule (gets lmsExposedTyCons)
 
 
 -- * Building ModuleInterfaces
@@ -118,21 +163,28 @@ makeModuleInterface tcMod = do
     _ <- liftGHC $ loadModule tcMod
 
     let modInfo = GHC.moduleInfo tcMod
-        thisMod = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
-        modName = makeModuleName thisMod
+        thisModule = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
+        modName = makeModuleName thisModule
 
-    setCurrentModule modName
+    setTargetModule thisModule
 
     (exportList, valueDecls, typeDecls) <-
         splitExports <$> mapM loadExport (modInfoExports modInfo)
 
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
 
-    typeMap <- withTypeEnv $ gets (Interface.lookupModule modName)
+    -- Insert a `TypeCon` into the `TypeEnv` for each linked type constructor
+    -- that is both defined in and exposed by the current module. Then, return
+    -- the `TypeMap` for the current module so the it can be included in
+    -- the `ModuleInterface`.
+    typeCons <- mapM makeTypeCon =<< seenLocalTyCons
+    typeMap <- withTypeEnv $ do
+        modify $ \env -> foldr insertType env typeCons
+        gets $ Interface.lookupModule modName
 
     pure ModuleInterface
         { Interface.moduleName = modName
-        , moduleTypes = typeMap
+        , moduleTypeCons   = typeMap
         , moduleValueDecls = nameMapFromList valueDecls
         , moduleTypeDecls  = nameMapFromList typeDecls
         , moduleExportList = exportList
@@ -141,22 +193,22 @@ makeModuleInterface tcMod = do
   where
     loadClassInstance :: GHC.ClsInst -> LoadModule ClassInstance
     loadClassInstance ci =
-        ClassInstance (getOccString $ InstEnv.is_cls_nm ci)  -- class name
-            <$> mapM makeType (InstEnv.is_tys ci)            -- instance types
+        ClassInstance (Name.getOccString $ InstEnv.is_cls_nm ci)
+            <$> mapM makeType (InstEnv.is_tys ci)   -- instance types
 
 
 loadExport :: GHC.Name -> LoadModule Export
 loadExport ghcName = do
-    thisModule <- getCurrentModule
+    local <- isLocal ghcName
     mTyThing <- liftGHC $ GHC.lookupName ghcName
     case mTyThing of
         Nothing ->
             error $ "loadExport: failed to find name " ++ showQualName q
         Just thing
-            | qualModuleName q /= thisModule ->
-                pure . ReExport $ SomeName (tyThingNamespace thing) <$> q
-            | otherwise ->
+            | local ->
                 makeLocalExport thing
+            | otherwise ->
+                pure . ReExport $ SomeName (tyThingNamespace thing) <$> q
   where
     q :: Qual RawName
     q = makeQualName ghcName
@@ -209,11 +261,8 @@ makeType = fmap normalizeType . go
             | Just (ta, tb) <- Type.splitAppTy_maybe t ->
                 Apply <$> go ta <*> go tb
             | Just (tc, ts) <- Type.splitTyConApp_maybe t -> do
-                -- TODO: type constructors that do not originate in the current
-                -- module should not be constructed with `makeTypeCon`:
-                -- they should be links
-                typeCon <- makeTypeCon tc
-                applyType (Con typeCon) <$> mapM go ts
+                link <- linkTyCon tc
+                applyType (Con link) <$> mapM go ts
             | otherwise -> do
                 s <- pprGHC t
                 fail $ "makeType: " ++ s
@@ -223,7 +272,7 @@ makeType = fmap normalizeType . go
 
     makeTypeVar :: GHC.TyVar -> TypeVar
     makeTypeVar tyVar =
-        TypeVar (getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
+        TypeVar (Name.getOccString tyVar) (makeKind $ Var.tyVarKind tyVar)
 
 
 -- | Construct a list of type predicates from a `GHC.PredType`
@@ -330,7 +379,7 @@ makeKind k0 = case splitForAllTys k0 of
 
 
 makeRawName :: (GHC.NamedThing n) => n -> RawName
-makeRawName = getOccString . GHC.getName
+makeRawName = Name.getOccString . GHC.getName
 
 
 tyThingNamespace :: GHC.TyThing -> Interface.Namespace

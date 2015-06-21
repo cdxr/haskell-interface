@@ -34,18 +34,22 @@ import Data.Interface.Module.Decl
 -- when examining differences between module versions.
 data ModuleInterface = ModuleInterface
     { moduleName       :: !ModuleName
-    , moduleTypes      :: !(Map RawName TypeCon)
+    , moduleTypeCons   :: !(Map RawName TypeCon)
+        -- ^ exposed type constructors originating in this module
     , moduleValueDecls :: !(Map RawName (Named ValueDecl))
+        -- ^ exposed values (identifiers, data constructors, pattern synonyms)
     , moduleTypeDecls  :: !(Map RawName (Named TypeDecl))
+        -- ^ exposed types (data/newtypes, type synonyms, class definitions)
     , moduleExportList :: ![ExportName]
     , moduleInstances  :: !(Set ClassInstance)
+
  -- , moduleDepends    :: !(Set ModuleName) -- cached list of dependencies
     } deriving (Show)
 
+
 type ExportName = Qual SomeName
 
-
-type ClassName = String
+type ClassName = RawName
 
 -- | A class instance definition, consisting of the class name and list of
 -- types to instantiate that class. Each type should match the corresponding
@@ -62,7 +66,7 @@ data ClassInstance = ClassInstance !ClassName [Type]
 emptyModuleInterface :: ModuleName -> ModuleInterface
 emptyModuleInterface modName = ModuleInterface
     { moduleName       = modName
-    , moduleTypes      = Map.empty
+    , moduleTypeCons   = Map.empty
     , moduleValueDecls = Map.empty
     , moduleTypeDecls  = Map.empty
     , moduleExportList = []

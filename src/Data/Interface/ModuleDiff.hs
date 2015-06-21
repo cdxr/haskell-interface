@@ -10,6 +10,7 @@ import Data.Function ( on )
 import Data.Interface.Module
 import Data.Interface.Name
 import Data.Interface.Change
+import Data.Interface.Type
 
 
 -- | A record of all changes and non-changes to a `ModuleInterface`.
@@ -18,7 +19,7 @@ import Data.Interface.Change
 --
 data ModuleDiff = ModuleDiff
     { diffModuleName       :: !(DiffEq ModuleName)
---  , diffModuleTypes      :: !(DiffMap RawName TypeChange Type)
+    , diffModuleTypeCons   :: !(DiffMapEq RawName TypeCon)
     , diffModuleValueDecls :: !(DiffMap RawName ValueDeclChange (Named ValueDecl))
     , diffModuleTypeDecls  :: !(DiffMap RawName TypeDeclChange (Named TypeDecl))
     , diffModuleExportList :: !(DiffSetEq ExportName)
@@ -29,6 +30,7 @@ data ModuleDiff = ModuleDiff
 diffModules :: ModuleInterface -> ModuleInterface -> ModuleDiff
 diffModules a b = ModuleDiff
     { diffModuleName       = on diffEq moduleName a b
+    , diffModuleTypeCons   = on diffMap moduleTypeCons a b
     , diffModuleValueDecls = on diffMap moduleValueDecls a b
     , diffModuleTypeDecls  = on diffMap moduleTypeDecls a b
     , diffModuleExportList = on diffSet (Set.fromList . moduleExportList) a b

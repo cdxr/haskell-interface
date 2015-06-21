@@ -16,7 +16,6 @@ import Data.Interface
 import Data.Interface.Change
 
 import ProgramArgs
-import Format
 import Render
 
 
@@ -28,7 +27,7 @@ main = do
 
 
 data Result = Result
-    { targetIds     :: (String, String)
+    { targetIds     :: (String, String)     -- ^ used to display targets
     , theModuleDiff :: ModuleDiff
     } deriving (Show)
 
@@ -55,23 +54,10 @@ dumpModuleInterface iface = do
     let render a = printRenderTree (indent 2) a >> putStrLn ""
 
     putStrLn "Exposed type constructors:\n"
-    forM_ (moduleTypes iface) $ render . renderTypeCon
+    forM_ (moduleTypeCons iface) $ render . renderTypeCon
 
     putStrLn "Module exports:\n"
     forM_ (moduleExports iface) $ render . renderExport
-
-{-
-    mapM_ (printFormatTree 2)
-        [ makeNode "Values:"    $ moduleValueDecls modIf
-        , makeNode "Types:"     $ moduleTypeDecls modIf
-        , makeNode "Exports:"   $ moduleExportList modIf
-        , makeNode "Instances:" $ moduleInstances modIf
-        ]
-  where
-    makeNode :: (Foldable f, Format a) => String -> f a -> FormatTree
-    makeNode lbl = formatNode lbl . map format . toList
--}
-
 
 
 newtype Report a = Report (ReaderT ProgramArgs IO a)
@@ -100,8 +86,9 @@ outputLine :: String -> Report ()
 outputLine = Report . lift . putStrLn
 
 
-outputTree :: FormatTree -> Report ()
-outputTree = Report . lift . printFormatTree 2
+renderTree :: RenderTree -> Report ()
+renderTree rt = Report . lift $
+    printRenderTree (indent 2) rt >> putStrLn ""
 
 
 reportResult :: Result -> Report ()
@@ -118,6 +105,9 @@ reportResult res = do
     reportChanges $ theModuleDiff res
 
 
+reportChanges = error "TODO"
+
+{-
 reportChanges :: ModuleDiff -> Report ()
 reportChanges mdiff = do
 
@@ -159,3 +149,4 @@ reportSummary title summary = do
         setColor color
         outputLine $ "* " ++ title ++ " (" ++ category ++ ")"
         forM_ es $ outputTree . format
+-}
