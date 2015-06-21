@@ -20,60 +20,57 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 
 
--- | Class for any type @c@ that represents a pair of values of type @a@,
--- where one value is considered an updated or more recent version of the
--- other.
-class Change a c | c -> a where
-    -- | @change a b@ is @Just c@ when there are differences between @a@ and
-    -- @b@, or @Nothing@ when @a@ and @b@ are considered equivalent.
-    change :: a -> a -> Maybe c
-
-    old :: c -> a
-    new :: c -> a
-
-
-diff :: (Change a c) => a -> a -> Diff c a
-diff a b = case change a b of
-    Just c  -> Diff c
-    Nothing -> Same b
-
-
-instance (Eq a) => Change a (Replace a) where
-    change a b
-        | a /= b    = Just $ Replace a b
-        | otherwise = Nothing
-
-    old (Replace a _) = a
-    new (Replace _ b) = b
-
-instance Change a c => Change a (Diff c a) where
-    change a b = Diff <$> change a b
-
-    old (Same a) = a
-    old (Diff c) = old c
-
-    new (Same a) = a
-    new (Diff c) = new c
-
-
--- * Change Types
-
 -- | @Change a@ represents an "old" value of @a@ paired with a corresponding
--- "new" value of @a@. The meaning of the @Change@ is entirely dependent on
--- context.
-data Replace a = Replace a a
+-- "new" value of @a@. There is a distinguished constructor for when these
+-- values are considered equal, which depends on the context in which the
+-- `Change` is used.
+data Change a = Same a | Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 
+-- | Class for any type @c@ that represents a pair of values of type @a@,
+-- where one value is considered an updated or more recent version of the
+-- other.
+class Diff a c | c -> a where
+    diff :: a -> a -> c
+    toChange :: c -> Change a
+
+
+old :: (Diff a c) => c -> a
+old c = case toChange c of
+    Change a _ -> a
+    Same a     -> a
+
+new :: (Diff a c) => c -> a
+new c = case toChange c of
+    Change _ b -> b
+    Same b     -> b
+
+same :: (Diff a c) => c -> Maybe a
+same c = case toChange c of
+    Same a -> Just a
+    Change{} -> Nothing
+
+
+
+instance (Eq a) => Diff a (Change a) where
+    diff a b
+        | a /= b    = Change a b
+        | otherwise = Same b
+
+    toChange = id
+    {-# INLINABLE toChange #-}
+
+
 -- | When @c@ represents a change to a value of type @c@, @Elem c a@ is 
--- a @c@, a newly-added @a@, or a removed @a@.
+-- a change, a newly-added @a@, or a removed @a@.
 data Elem c a
     = Removed a   -- ^ the old value
     | Added a     -- ^ the new value
     | Changed c   -- ^ the old and new value
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-type ElemEq a = Elem (Replace a) a
+type ElemEq a = Elem (Change a) a
 
 instance Bifunctor Elem where
     bimap f g e = case e of
@@ -82,90 +79,65 @@ instance Bifunctor Elem where
         Changed c -> Changed (f c)
 
 
--- * Diff
-
--- | When @c@ represents a change to a value of type @a@, @Diff c a@ is only
--- a _potential_ change.
-data Diff c a = Same a | Diff c
-    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
-
-type DiffEq a = Diff (Replace a) a
-type DiffElem c a = Diff (Elem c a) a
-
-instance Bifunctor Diff where
-    bimap f g d = case d of
-        Same a -> Same (g a)
-        Diff c -> Diff (f c)
-
-maybeChange :: Diff c a -> Maybe c
-maybeChange d = case d of
-    Same _ -> Nothing
-    Diff c -> Just c
-
-diffEq :: (Eq a) => a -> a -> Diff (Replace a) a
-diffEq a b
-    | a /= b    = Diff (Replace a b)
-    | otherwise = Same b
-
-diffMaybe :: (Eq a) => Maybe a -> Maybe a -> Maybe (DiffElem (Replace a) a)
+diffMaybe :: (Diff a c) => Maybe a -> Maybe a -> Maybe (Elem c a)
 diffMaybe Nothing Nothing = Nothing
-diffMaybe (Just a) Nothing = Just $ Diff (Removed a)
-diffMaybe Nothing (Just b) = Just $ Diff (Added b)
-diffMaybe (Just a) (Just b)
-    | a /= b    = Just $ Diff (Changed (Replace a b))
-    | otherwise = Just $ Same b
+diffMaybe (Just a) Nothing = Just $ Removed a
+diffMaybe Nothing (Just b) = Just $ Added b
+diffMaybe (Just a) (Just b) = Just $ Changed (diff a b)
 
 
 -- * Computing Diffs for structures
 
 -- ** Set
 
-type DiffSet c a = [Diff (Elem c a) a]
-type DiffSetEq a = DiffSet (Replace a) a
+type DiffSet c a = [Elem c a]
+type DiffSetEq a = [ElemEq a]
 
 -- | The differences in element inclusion between two sets
 diffSet :: (Ord a) => Set a -> Set a -> DiffSetEq a
 diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
   where
-    go [] ys = map (Diff . Added) ys
-    go xs [] = map (Diff . Removed) xs
+    go [] ys = map Added ys
+    go xs [] = map Removed xs
     go (x:xs) (y:ys) = case compare x y of
-        EQ -> Same y : go xs ys
-        LT -> Diff (Removed x) : go xs (y:ys)
-        GT -> Diff (Added y) : go (x:xs) ys
+        EQ -> Changed (Same y) : go xs ys
+        LT -> Removed x : go xs (y:ys)
+        GT -> Added y : go (x:xs) ys
 
-diffSetSummary :: DiffSet c a -> DiffSummary c a
+diffSetSummary :: (Diff a c) => DiffSet c a -> DiffSummary c a
 diffSetSummary = transDiffSummary reverse . foldr (addDiffElem (:)) mempty
 
 
 -- ** Map
 
-type DiffMap k c a = Map k (DiffElem c a)
-type DiffMapEq k a = DiffMap k (Replace a) a
+type DiffMap k c a = Map k (Elem c a)
+type DiffMapEq k a = Map k (ElemEq a)
 
-diffMap :: (Ord k, Change a c) => Map k a -> Map k a -> DiffMap k c a
+diffMap :: (Ord k, Diff a c) => Map k a -> Map k a -> DiffMap k c a
 diffMap = diffMapWith (const diff)
 
 diffMapWith :: (Ord k) =>
-    (k -> a -> a -> Diff c a) ->
+    (k -> a -> a -> c) ->
     Map k a -> Map k a -> DiffMap k c a
 diffMapWith mkDiff = Map.mergeWithKey combine only1 only2
   where
-    combine k x y = Just $ first Changed $ mkDiff k x y
-    only1 = Map.map $ Diff . Removed
-    only2 = Map.map $ Diff . Added
+    combine k x y = Just $ Changed (mkDiff k x y)
+    only1 = Map.map Removed
+    only2 = Map.map Added
 
 
-diffMapSummary' :: (Ord k) => DiffMap k c a -> DiffSummary' (Map k) c a
+diffMapSummary' ::
+    (Diff a c, Ord k) =>
+    DiffMap k c a -> DiffSummary' (Map k) c a
 diffMapSummary' = foldr f mempty . Map.toList
   where
-    f :: (Ord k) =>
-         (k, Diff (Elem c a) a) ->
+    f :: (Diff a c, Ord k) =>
+         (k, Elem c a) ->
          DiffSummary' (Map k) c a ->
          DiffSummary' (Map k) c a
     f (k, d) = addDiffElem (Map.insert k) d
 
-diffMapSummary :: (Ord k) => DiffMap k c a -> DiffSummary c a
+diffMapSummary :: (Diff a c, Ord k) => DiffMap k c a -> DiffSummary c a
 diffMapSummary = transDiffSummary Map.elems . diffMapSummary'
 
 
@@ -196,17 +168,18 @@ transDiffSummary ::
 transDiffSummary f (DiffSummary a b c d) = DiffSummary (f a) (f b) (f c) (f d)
 
 addDiff ::
+    (Diff a c) =>
     (forall b. b -> f b -> f b) ->
-    Diff c a -> DiffSummary' f c a -> DiffSummary' f c a
-addDiff add d ds = case d of
-    Same a -> ds { unchanged = add a (unchanged ds) }
-    Diff c -> ds { changed   = add c (changed ds) }
+    c -> DiffSummary' f c a -> DiffSummary' f c a
+addDiff add c ds = case same c of
+    Just a  -> ds { unchanged = add a (unchanged ds) }
+    Nothing -> ds { changed   = add c (changed ds) }
 
 addDiffElem ::
+    (Diff a c) =>
     (forall b. b -> f b -> f b) ->
-    Diff (Elem c a) a -> DiffSummary' f c a -> DiffSummary' f c a
-addDiffElem add d ds = case d of
-    Same a           -> ds { unchanged = add a (unchanged ds) }
-    Diff (Removed a) -> ds { removed   = add a (removed ds) }
-    Diff (Added a)   -> ds { added     = add a (added ds)}
-    Diff (Changed c) -> ds { changed   = add c (changed ds)}
+    Elem c a -> DiffSummary' f c a -> DiffSummary' f c a
+addDiffElem add e ds = case e of
+    Removed a -> ds { removed   = add a (removed ds) }
+    Added a   -> ds { added     = add a (added ds)}
+    Changed c -> addDiff add c ds

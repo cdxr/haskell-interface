@@ -18,7 +18,7 @@ import Data.Interface.Type
 -- before or after the changes.
 --
 data ModuleDiff = ModuleDiff
-    { diffModuleName       :: !(DiffEq ModuleName)
+    { diffModuleName       :: !(Change ModuleName)
     , diffModuleTypeCons   :: !(DiffMapEq RawName TypeCon)
     , diffModuleValueDecls :: !(DiffMap RawName ValueDeclChange (Named ValueDecl))
     , diffModuleTypeDecls  :: !(DiffMap RawName TypeDeclChange (Named TypeDecl))
@@ -29,7 +29,7 @@ data ModuleDiff = ModuleDiff
 
 diffModules :: ModuleInterface -> ModuleInterface -> ModuleDiff
 diffModules a b = ModuleDiff
-    { diffModuleName       = on diffEq moduleName a b
+    { diffModuleName       = on diff moduleName a b
     , diffModuleTypeCons   = on diffMap moduleTypeCons a b
     , diffModuleValueDecls = on diffMap moduleValueDecls a b
     , diffModuleTypeDecls  = on diffMap moduleTypeDecls a b
@@ -38,21 +38,7 @@ diffModules a b = ModuleDiff
     }
 
 
--- TODO: the definitions of ValueChange and TypeChange are temporary
-
-newtype ValueDeclChange = ValueDeclChange (Replace (Named ValueDecl))
-    deriving (Show, Eq, Ord)
-
-instance Change (Named ValueDecl) ValueDeclChange where
-    change a b
-        | namedThing a == namedThing b = Just $ ValueDeclChange $ Replace a b
-        | otherwise = Nothing
+type ValueDeclChange = Change (Named ValueDecl)
 
 
-newtype TypeDeclChange = TypeDeclChange (Replace (Named TypeDecl))
-    deriving (Show, Eq, Ord)
-
-instance Change (Named TypeDecl) TypeDeclChange where
-    change a b
-        | namedThing a == namedThing b = Just $ TypeDeclChange $ Replace a b
-        | otherwise = Nothing
+type TypeDeclChange = Change (Named TypeDecl)
