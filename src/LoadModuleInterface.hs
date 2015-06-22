@@ -6,7 +6,6 @@ import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
-import Control.Arrow ( second )
 import qualified Data.Set as Set
 
 import GHC
@@ -78,9 +77,6 @@ moduleInterfacesForTargets targets = do
 
     sortGraph :: ModuleGraph -> ModuleGraph
     sortGraph g = flattenSCCs $ topSortModuleGraph False g Nothing
-
-    withFreshTypeEnv :: (Monad m) => StateT TypeEnv m a -> m a
-    withFreshTypeEnv m = evalStateT m emptyTypeEnv
 
 
 -- * LoadModule
@@ -170,7 +166,7 @@ makeModuleInterface tcMod = do
     setTargetModule thisModule
 
     (exportList, valueDecls, typeDecls) <-
-        splitExports <$> mapM loadExport (modInfoExports modInfo)
+        splitExports modName <$> mapM loadExport (modInfoExports modInfo)
 
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
 
@@ -238,13 +234,11 @@ makeLocalExport thing = case thing of
     thingName = GHC.getName thing
 
     mkValueDecl :: ValueDecl -> Export
-    mkValueDecl = LocalValue . makeQualNamed thingName
+    mkValueDecl = LocalValue . makeNamed thingName
 
     mkTypeDecl :: GHC.TyCon -> TypeDecl -> LoadModule Export
     mkTypeDecl tyCon typeDecl = do
-        let q = makeQualNamed thingName typeDecl
-        
-        pure $ LocalType q
+        pure $ LocalType $ makeNamed thingName typeDecl
 
 
 -- | Construct a `Interface.Type` to be included in a `ModuleInterface`.

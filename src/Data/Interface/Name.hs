@@ -187,6 +187,9 @@ type NameMap = Map RawName
 nameMapFromList :: (HasRawName a) => [a] -> NameMap a
 nameMapFromList = Map.fromList . map (\x -> (rawName x, x))
 
+emptyNameMap :: NameMap a
+emptyNameMap = Map.empty
+
 insertNamed :: (HasRawName a) => a -> NameMap a -> NameMap a
 insertNamed a = Map.insert (rawName a) a
 
@@ -197,3 +200,6 @@ lookupName = Map.lookup . rawName
 lookupRawName :: RawName -> NameMap a -> Maybe a
 lookupRawName = Map.lookup
 {-# INLINABLE lookupRawName #-}
+
+deleteName :: (HasName s n, HasName s a) => n -> NameMap a -> NameMap a
+deleteName = Map.delete . rawName

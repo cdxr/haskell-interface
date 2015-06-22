@@ -7,6 +7,7 @@ import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 
 import Data.Foldable ( toList )
+import Data.Maybe ( mapMaybe )
 
 import qualified System.Console.ANSI as ANSI
 
@@ -56,8 +57,10 @@ dumpModuleInterface iface = do
     putStrLn "Exposed type constructors:\n"
     forM_ (moduleTypeCons iface) $ render . renderTypeCon
 
+    let qc = qualifyAll  -- TODO: set `QualContext`
+
     putStrLn "Module exports:\n"
-    forM_ (moduleExports iface) $ render . renderExport
+    forM_ (compileModuleExports iface) $ render . renderExport qc
 
 
 newtype Report a = Report (ReaderT ProgramArgs IO a)
@@ -102,12 +105,16 @@ reportResult res = do
         , "   " ++ t1
         , "************************************"
         ]
-    reportChanges $ theModuleDiff res
 
+    let qc = qualifyAll  -- TODO store a `QualifyContext` in the `Result`
 
-reportChanges = error "TODO"
+    mapM_ renderTree . mapMaybe (renderChangedExportDiff qc) $
+        diffModuleExports $ theModuleDiff res
+        
 
 {-
+OLD:
+
 reportChanges :: ModuleDiff -> Report ()
 reportChanges mdiff = do
 

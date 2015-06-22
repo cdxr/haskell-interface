@@ -13,6 +13,8 @@ import Data.Bifunctor
 import Data.Function ( on )
 import Data.Monoid
 
+import Data.Void ( Void )
+
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
@@ -28,6 +30,13 @@ data Change a = Same a | Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 
+-- | @Replace a@ is like @Change a@, except that the values are always
+-- considered different. It should appear in contexts where the values have
+-- been statically determined to be different.
+data Replace a = Replace a a
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+
 -- | Class for any type @c@ that represents a pair of values of type @a@,
 -- where one value is considered an updated or more recent version of the
 -- other.
@@ -39,6 +48,13 @@ data Change a = Same a | Change a a
 class Diff a c | c -> a where
     diff :: a -> a -> c
     toChange :: c -> Change a
+
+    isChanged :: c -> Bool
+    isChanged c = case toChange c of
+        Same{}   -> False
+        Change{} -> True
+
+    {-# MINIMAL diff, toChange #-}
 
 
 -- | @old c@ is the older value of @a@ stored in the @c@.
@@ -77,6 +93,12 @@ instance (Eq a) => Diff a (Change a) where
     {-# INLINABLE toChange #-}
 
 
+-- | trivial: considers all values to be distinct
+instance Diff a (Replace a) where
+    diff = Replace
+    toChange (Replace a b) = Change a b
+
+
 -- | When @c@ represents a change to a value of type @c@, @Elem c a@ is 
 -- a change, a newly-added @a@, or a removed @a@.
 data Elem c a
@@ -84,6 +106,15 @@ data Elem c a
     | Added a     -- ^ the new value
     | Changed c   -- ^ the old and new value
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+isElemChanged :: (Diff a c) => Elem c a -> Bool
+isElemChanged e = case e of
+    Removed{} -> True
+    Added{}   -> True
+    Changed c -> isChanged c
+
+-- | An `Elem` that can never represent a change, only an addition or removal.
+type Elem' = Elem Void
 
 -- | An @Elem (Change a) a@.
 -- This is named for the class instance @Diff a (Change a)@, which uses the

@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Data.Interface.Type.Diff where
 
@@ -19,8 +20,8 @@ import Data.Interface.Type.Type
 -- @t@ is a single type
 -- @c@ is a type change (containing a pair of potentially-different types)
 data DiffTypeF t c
-    = DiffTypeF (Change (TypeF t))   -- ^ TypeF is changed
-    | SameTypeF (TypeF c)            -- ^ TypeF is not changed (@a@ might be)
+    = DiffTypeF (Replace (TypeF t))   -- ^ TypeF is changed
+    | SameTypeF (TypeF c)             -- ^ TypeF is not changed (@a@ might be)
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
@@ -34,7 +35,7 @@ instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
                 Change                         --   and wrap them in the
                     (fmap old fc)              --   `Change` constructor
                     (fmap new fc)
-        DiffTypeF c -> c
+        DiffTypeF r -> toChange r
 
 
 -- | Compare two open type terms.
@@ -52,7 +53,7 @@ diffTypeF a b = case (a, b) of
         SameTypeF $ ForallF vs1 (diff t0 t1)
     (ContextF ps0 t0, ContextF ps1 t1) | ps0 == ps1 ->
         SameTypeF $ ContextF ps1 (diff t0 t1)
-    _ -> DiffTypeF (Change a b)
+    _ -> DiffTypeF (Replace a b)
 
 {- diffTypeF notes:
      - Type constructors are considered equal if they have the same name and
@@ -66,6 +67,17 @@ diffTypeF a b = case (a, b) of
 
 
 type TypeDiff = FF.Fix (DiffTypeF Type)
+
+-- | @iterTypeDiff td@ is either @Left@ two different Types, or @Right@
+-- an open type term that matches both types, containing additional TypeDiffs.
+iterTypeDiff :: TypeDiff -> Either (Replace Type) (TypeF TypeDiff)
+iterTypeDiff td = case FF.project td of
+    DiffTypeF r -> Left $ fmap FF.embed r
+    SameTypeF t -> Right $ t
+
+
+pattern TypeDiff :: DiffTypeF Type TypeDiff -> TypeDiff
+pattern TypeDiff f = FF.Fix f
 
 instance Diff Type TypeDiff where
     diff a b = FF.embed $ diffTypeF (FF.project a) (FF.project b)

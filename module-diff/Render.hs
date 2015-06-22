@@ -1,14 +1,20 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Render where
 
 import Control.Monad
 import Data.Tree
 
+import Data.Void ( absurd )
+import Data.Functor.Foldable ( embed, project, cata, para )
+
 import Data.Interface
 import Data.Interface.Change
+import Data.Interface.Type.Diff
 
 
+-- TODO: add a (QualContext ->) and color information to `RenderTree`
 type RenderTree = Tree String
 
 data RenderStyle = RenderStyle
@@ -70,19 +76,27 @@ formatPred qc p = case p of
     EqPred{} -> show p  -- TODO
 
 
-renderExport :: Export -> RenderTree
-renderExport e = case e of
-    LocalValue q -> renderNamed valueDeclProps $ unqual q
-    LocalType q  -> renderNamed typeDeclProps $ unqual q
-    ReExport q   -> Node (formatSomeName q) []
+renderExport :: QualContext -> Export -> RenderTree
+renderExport qc e = case e of
+    LocalValue vd -> renderValueDecl qc vd
+    LocalType td  -> renderTypeDecl qc td
+    ReExport q    -> Node (formatSomeName q) []
 
 
 renderNamed :: (a -> [RenderTree]) -> Named a -> RenderTree
 renderNamed f (Named n o a) = Node n (pure (formatOrigin o) : f a)
 
 
-valueDeclProps :: ValueDecl -> [RenderTree]
-valueDeclProps vd = [info, Node "::" [renderType qualifyAll t] ]
+renderValueDecl :: QualContext -> Named ValueDecl -> RenderTree
+renderValueDecl = renderNamed . valueDeclProps
+
+
+renderTypeDecl :: QualContext -> Named TypeDecl -> RenderTree
+renderTypeDecl = renderNamed . typeDeclProps
+
+
+valueDeclProps :: QualContext -> ValueDecl -> [RenderTree]
+valueDeclProps qc vd = [info, Node "::" [renderType qc t] ]
   where
     t = typeOf vd
 
@@ -95,8 +109,8 @@ valueDeclProps vd = [info, Node "::" [renderType qualifyAll t] ]
             Node "[data constructor]" (map (pure . rawName) fields)
 
 
-typeDeclProps :: TypeDecl -> [RenderTree]
-typeDeclProps td = [info, Node "::" [pure $ pprintKind qualifyAll k] ]
+typeDeclProps :: QualContext -> TypeDecl -> [RenderTree]
+typeDeclProps qc td = [info, Node "::" [pure $ pprintKind qc k] ]
   where
     k = kindOf td
 
@@ -111,37 +125,96 @@ typeDeclProps td = [info, Node "::" [pure $ pprintKind qualifyAll k] ]
             pure "[class]"
 
 
-renderType :: QualContext -> Type -> RenderTree
-renderType qc = go
+renderChangedExportDiff :: QualContext -> ExportDiff -> Maybe RenderTree
+renderChangedExportDiff qc ed = case ed of
+    SameReExport{} -> Nothing
+    DiffReExport e -> Just $ renderElem' renderReExport e
+    DiffValue dv
+        | isElemChanged dv ->
+            Just $ renderElem (renderValueDeclChange qc)
+                              (renderValueDecl qc)
+                              dv
+        | otherwise -> Nothing
+    DiffType dt
+        | isElemChanged dt ->
+            Just $ renderElem (renderTypeDeclChange qc)
+                              (renderTypeDecl qc)
+                              dt
+        | otherwise -> Nothing
   where
-    go t0 = case t0 of
-        Var (TypeVar s k) -> pure s
-        Con qual -> pure $ resolveQual qc qual
-        Apply{} -> 
-            let tcon : params = flattenApply t0
-            in Node (pprintType qc tcon) (map go params)
-        Fun a b ->
-            Node "(->)" [go a, go b]
-        Forall vs t ->
-            Node "Forall "
-                [ Node "[vars]" $ map (pure . pprintVar qc) vs
-                , go t
-                ]
-        Context ps t ->
-            Node "Context"
-                [ Node "[preds]" $ map (pure . formatPred qc) ps
-                , go t
-                ]
+    renderReExport = pure . resolveQual qc
+
+
+renderValueDeclChange :: QualContext -> ValueDeclChange -> RenderTree
+renderValueDeclChange _ = pure . show  -- TODO
+
+renderTypeDeclChange :: QualContext -> TypeDeclChange -> RenderTree
+renderTypeDeclChange _ = pure . show  -- TODO
+
+
+
+renderElem :: (c -> RenderTree) -> (a -> RenderTree) -> Elem c a -> RenderTree
+renderElem rc ra e = case e of
+    Added a   -> Node "[added]" [ ra a ]
+    Removed a -> Node "[removed]" [ ra a ]
+    Changed c -> rc c
+
+renderElem' :: (a -> RenderTree) -> Elem' a -> RenderTree
+renderElem' = renderElem absurd
+
+
+renderType :: QualContext -> Type -> RenderTree
+renderType qc = para (paraRenderTypeF qc)
+
 
 renderTypeDiff :: QualContext -> TypeDiff -> RenderTree
-renderTypeDiff qc d = case d of
-    
+renderTypeDiff qc td = case iterTypeDiff td of
+    Left (Replace a b) ->
+        Node "[change]"
+            [ Node "-" [renderType qc a]
+            , Node "+" [renderType qc b]
+            ]
+    Right f -> renderTypeF qc $ fmap (renderTypeDiff qc) f
 
 
 
+-- | An algebra for reducing an open type term to a RenderTree
+renderTypeF :: QualContext -> TypeF RenderTree -> RenderTree
+renderTypeF qc t0 = case t0 of
+    VarF (TypeVar s k) -> pure s
+    ConF qual -> pure $ resolveQual qc qual
+    ApplyF c a -> 
+        Node "Apply" [c, a]
+    --  ApplyF{} -> 
+    --      let tcon : params = flattenApply t0
+    --      in Node (pprintType qc tcon) params
+    FunF a b ->
+        Node "(->)" [a, b]
+    ForallF vs t ->
+        Node "Forall "
+            [ Node "[vars]" $ map (pure . pprintVar qc) vs
+            , t
+            ]
+    ContextF ps t ->
+        Node "Context"
+            [ Node "[preds]" $ map (pure . formatPred qc) ps
+            , t
+            ]
+
+-- | A paramorphic version of `renderTypeF` that uses information about
+-- subterms to pretty-print type constructors.
+paraRenderTypeF :: QualContext -> TypeF (Type, RenderTree) -> RenderTree
+paraRenderTypeF qc t0 = case t0 of
+    ApplyF (c,_) (_, a) -> 
+        Node (pprintType qc c) [a]
+    _ -> renderTypeF qc $ fmap snd t0
+
+
+{-
 flattenApply :: Type -> [Type]
 flattenApply t0 = case t0 of
     Apply a r -> case a of
         Apply as t -> flattenApply as ++ [t,r]
         _ -> [a,r]
     _ -> [t0]
+-}

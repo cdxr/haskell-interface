@@ -48,6 +48,7 @@ executable module-diff
     transformers,
     containers,
     filepath,
+    recursion-schemes,
     ansi-terminal >=0.6,
     optparse-applicative >=0.11 && <0.12
   hs-source-dirs: module-diff
