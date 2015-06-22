@@ -87,12 +87,11 @@ formatWords :: [TypeFormatter] -> TypeFormatter
 formatWords = mconcat . intersperse (char ' ')
 
 
--- TODO: special cases for wired types
 -- TODO: infix type constructors
+-- TODO: contexts
 formatType :: Type -> TypeFormatter
 formatType t0 = case t0 of
     Var v   -> string $ varName v
---  Wired w -> string $ showWiredType w
     Con q   -> qualName q
     Apply c t -> formatApply c t
     Fun a b -> formatFun a b

@@ -133,6 +133,11 @@ renderType qc = go
                 , go t
                 ]
 
+renderTypeDiff :: QualContext -> TypeDiff -> RenderTree
+renderTypeDiff qc d = case d of
+    
+
+
 
 flattenApply :: Type -> [Type]
 flattenApply t0 = case t0 of

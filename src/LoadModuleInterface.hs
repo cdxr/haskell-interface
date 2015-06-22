@@ -31,6 +31,7 @@ import qualified Type
 import qualified Kind
 
 import Data.Interface as Interface
+import Data.Interface.Type.Build as Build
 
 import Debug.Trace
 
@@ -248,27 +249,26 @@ makeLocalExport thing = case thing of
 
 -- | Construct a `Interface.Type` to be included in a `ModuleInterface`.
 makeType :: GHC.Type -> LoadModule Interface.Type
-makeType = fmap normalizeType . go
+makeType = go
   where
     go t0 = case splitForAllTys t0 of
         ([], t)
             | Just tyVar <- Type.getTyVar_maybe t ->
-                pure $ Var $ makeTypeVar tyVar
+                pure $ var $ makeTypeVar tyVar
             | Just (ta, tb) <- Type.splitFunTy_maybe t ->
                 if Type.isPredTy ta
-                    then Context <$> makePreds ta <*> go tb
-                    else Fun <$> go ta <*> go tb
+                    then context <$> makePreds ta <*> go tb
+                    else fun <$> go ta <*> go tb
             | Just (ta, tb) <- Type.splitAppTy_maybe t ->
-                Apply <$> go ta <*> go tb
+                apply1 <$> go ta <*> go tb
             | Just (tc, ts) <- Type.splitTyConApp_maybe t -> do
                 link <- linkTyCon tc
-                applyType (Con link) <$> mapM go ts
+                apply (con link) <$> mapM go ts
             | otherwise -> do
                 s <- pprGHC t
                 fail $ "makeType: " ++ s
             -- TODO: numeric and string literals
-        (vs, t) ->
-            Forall (map makeTypeVar vs) <$> go t
+        (vs, t) -> forall (map makeTypeVar vs) <$> go t
 
     makeTypeVar :: GHC.TyVar -> TypeVar
     makeTypeVar tyVar =

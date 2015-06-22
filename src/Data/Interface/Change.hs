@@ -31,26 +31,41 @@ data Change a = Same a | Change a a
 -- | Class for any type @c@ that represents a pair of values of type @a@,
 -- where one value is considered an updated or more recent version of the
 -- other.
+--
+-- @
+-- toChange (diff a b) = Change c d  ==>  (a,b) = (c,d)
+-- @
+--
 class Diff a c | c -> a where
     diff :: a -> a -> c
     toChange :: c -> Change a
 
 
+-- | @old c@ is the older value of @a@ stored in the @c@.
+--
+-- @
+-- old (diff a b) = a
+-- @
 old :: (Diff a c) => c -> a
 old c = case toChange c of
     Change a _ -> a
     Same a     -> a
 
+-- | @new c@ is the newer value of @a@ stored in the @c@.
+--
+-- @
+-- new (diff a b) = b
+-- @
 new :: (Diff a c) => c -> a
 new c = case toChange c of
     Change _ b -> b
     Same b     -> b
 
+-- | @same c@ is @Just a@ when @a = old c = new c@.
 same :: (Diff a c) => c -> Maybe a
 same c = case toChange c of
     Same a -> Just a
     Change{} -> Nothing
-
 
 
 instance (Eq a) => Diff a (Change a) where
@@ -70,6 +85,9 @@ data Elem c a
     | Changed c   -- ^ the old and new value
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
+-- | An @Elem (Change a) a@.
+-- This is named for the class instance @Diff a (Change a)@, which uses the
+-- notion of equality provided by `Eq`.
 type ElemEq a = Elem (Change a) a
 
 instance Bifunctor Elem where
