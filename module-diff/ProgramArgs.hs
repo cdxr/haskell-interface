@@ -15,7 +15,8 @@ import Options.Applicative
 parseProgramArgs :: IO ProgramArgs
 parseProgramArgs =
     execParser $
-        info (helper <*> mainParser)
+        -- info (helper <*> mainParser)
+         info (helper <*> mainParser <|> pure defaultProgramArgs)
              (fullDesc <> header "compare module interfaces")
 
 type Flag = Bool
@@ -25,6 +26,15 @@ data ProgramArgs = ProgramArgs
     , outputClassInstances :: Flag
     , programTarget        :: Target
     } deriving (Show, Eq, Ord)
+
+-- | The arguments used when the program is run with no arguments
+defaultProgramArgs :: ProgramArgs
+defaultProgramArgs = ProgramArgs
+    { dumpInterfaces = False
+    , outputClassInstances = False
+    , programTarget = t
+    } where Just t = lookupBuiltinTarget "test"
+
 
 data Target = Target FilePath FilePath
     deriving (Show, Eq, Ord)
