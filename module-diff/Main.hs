@@ -52,7 +52,7 @@ dumpModuleInterface :: ModuleInterface -> IO ()
 dumpModuleInterface iface = do
     putStrLn $ "\n*** Module: " ++ moduleName iface ++ " ***\n"
 
-    let render a = printRenderTree (indent 2) a >> putStrLn ""
+    let render a = renderStdout (indent 2) a >> putStrLn ""
 
     putStrLn "Exposed type constructors:\n"
     forM_ (moduleTypeCons iface) $ render . renderTypeCon
@@ -80,18 +80,13 @@ whenFlag_ :: (ProgramArgs -> Flag) -> Report a -> Report ()
 whenFlag_ f = void . whenFlag f
 
 
-setColor :: ANSI.Color -> Report ()
-setColor c = Report . lift $ putStr s
-  where
-    s = ANSI.setSGRCode [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
-
 outputLine :: String -> Report ()
 outputLine = Report . lift . putStrLn
 
 
 renderTree :: RenderTree -> Report ()
 renderTree rt = Report . lift $
-    printRenderTree (indent 2) rt >> putStrLn ""
+    renderStdout (indent 2) rt >> putStrLn ""
 
 
 reportResult :: Result -> Report ()
@@ -110,50 +105,3 @@ reportResult res = do
 
     mapM_ renderTree . mapMaybe (renderChangedExportDiff qc) $
         diffModuleExports $ theModuleDiff res
-        
-
-{-
-OLD:
-
-reportChanges :: ModuleDiff -> Report ()
-reportChanges mdiff = do
-
-    onDiff (diffModuleName mdiff) $ \(Replace a b) ->
-        outputLine $ "Module renamed from " ++ show a ++ " to " ++ show b
-
-    reportSummary "Local Values" $ diffMapSummary $ diffModuleValueDecls mdiff
-    reportSummary "Local Types"  $ diffMapSummary $ diffModuleTypeDecls mdiff
-    reportSummary "Exports"      $ diffSetSummary $ diffModuleExportList mdiff
-
-    whenFlag_ outputClassInstances $
-        reportSummary "Instances" $ diffSetSummary $ diffModuleInstances mdiff
-
-  where
-    onDiff :: (Applicative m) => Diff c a -> (c -> m b) -> m ()
-    onDiff (Same _)  _ = pure ()
-    onDiff (Diff c) f = void $ f c
-
-
-reportSummary :: (Format c, Format a) => String -> DiffSummary c a -> Report ()
-reportSummary title summary = do
-    outputLine $ unlines
-        [ ""
-        , "*** " ++ title ++ " ***"
-        , show (length $ unchanged summary) ++ " unchanged"
-        , show (length $ changed summary) ++ " changed"
-        , show (length $ added summary) ++ " added"
-        , show (length $ removed summary) ++ " removed"
-        ]
-
-    outputAll "changed" ANSI.Blue  $ changed summary
-    outputAll "added"   ANSI.Green $ added summary
-    outputAll "removed" ANSI.Red   $ removed summary
-  where
-    outputAll ::
-        (Foldable f, Format a) =>
-        String -> ANSI.Color -> f a -> Report ()
-    outputAll category color es = do
-        setColor color
-        outputLine $ "* " ++ title ++ " (" ++ category ++ ")"
-        forM_ es $ outputTree . format
--}

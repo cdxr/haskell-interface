@@ -1,10 +1,15 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Render where
 
 import Control.Monad
-import Data.Tree
+import Control.Monad.Free
+import Control.Monad.Trans.Reader
 
 import Data.Void ( absurd )
 import Data.Functor.Foldable ( embed, project, cata, para )
@@ -13,9 +18,14 @@ import Data.Interface
 import Data.Interface.Change
 import Data.Interface.Type.Diff
 
+import System.Console.ANSI as ANSI
 
--- TODO: add a (QualContext ->) and color information to `RenderTree`
-type RenderTree = Tree String
+
+data Render a
+    = Render String [a]
+    | SetSGR [ANSI.SGR] a
+    deriving (Functor, Foldable, Traversable)
+
 
 data RenderStyle = RenderStyle
     { baseIndent :: Int
@@ -32,24 +42,46 @@ indent :: Int -> RenderStyle
 indent i = defaultRenderStyle { baseIndent = i }
 
 
-renderTreeLines :: RenderStyle -> RenderTree -> [String]
-renderTreeLines RenderStyle{..} = go 0
+type RenderTree = Free Render ()
+
+renderStdout :: RenderStyle -> RenderTree -> IO ()
+renderStdout style renderTree = do
+    let initSGR = [ANSI.Reset]
+    putStr $ ANSI.setSGRCode initSGR
+    go 0 initSGR renderTree
   where
+    go :: Int -> [ANSI.SGR] -> Free Render () -> IO ()
+    go depth sgr0 m0 = case m0 of
+        Pure () -> pure ()
+        Free r -> case r of
+            Render s ms -> do
+                putStrLn $ indent depth s
+                forM_ ms $ go (depth+1) sgr0
+            SetSGR sgr m -> do
+                putStr $ setSGRCode sgr
+                go depth sgr m
+                putStr $ setSGRCode sgr0
+
+    indent :: Int -> String -> String
     indent d s = replicate (baseIndent + incrIndent * d) ' ' ++ s
-    go depth (Node s ts) =
-        indent depth s : concatMap (go $ depth + 1) ts
+      where RenderStyle{..} = style
 
 
-printRenderTree :: RenderStyle -> RenderTree -> IO ()
-printRenderTree indentSize =
-    putStr . unlines . renderTreeLines indentSize
+node :: (MonadFree Render m) => String -> [m ()] -> m ()
+node s = wrap . Render s
+
+line :: (MonadFree Render m) => String -> m ()
+line s = wrap $ Render s []
+
+color :: ANSI.Color -> Free Render a -> Free Render a
+color c = wrap . SetSGR [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
 
 
-renderTypeCon :: TypeCon -> RenderTree
+renderTypeCon :: TypeCon -> Free Render ()
 renderTypeCon (TypeCon name origin kind info) =
-    Node (name ++ " :: " ++ showKind kind)
-        [ pure infoString
-        , Node (formatOrigin origin) []
+    node (name ++ " :: " ++ showKind kind)
+        [ line infoString
+        , node (formatOrigin origin) []
         ]
   where
     infoString = case info of
@@ -76,69 +108,69 @@ formatPred :: QualContext -> Pred -> String
 formatPred = pprintPred
 
 
-renderExport :: QualContext -> Export -> RenderTree
+renderExport :: QualContext -> Export -> Free Render ()
 renderExport qc e = case e of
     LocalValue vd -> renderNamedValueDecl qc vd
     LocalType td  -> renderNamedTypeDecl qc td
-    ReExport q    -> Node (formatSomeName q) []
+    ReExport q    -> node (formatSomeName q) []
 
 
-renderNamed :: (a -> [RenderTree]) -> Named a -> RenderTree
-renderNamed f (Named n a) = Node n (f a)
+renderNamed :: (a -> [Free Render ()]) -> Named a -> Free Render ()
+renderNamed f (Named n a) = node n (f a)
 
 
-renderNamedValueDecl :: QualContext -> Named ValueDecl -> RenderTree
+renderNamedValueDecl :: QualContext -> Named ValueDecl -> Free Render ()
 renderNamedValueDecl = renderNamed . valueDeclProps
 
-renderNamedTypeDecl :: QualContext -> Named TypeDecl -> RenderTree
+renderNamedTypeDecl :: QualContext -> Named TypeDecl -> Free Render ()
 renderNamedTypeDecl = renderNamed . typeDeclProps
 
 
-renderValueDeclProps :: QualContext -> ValueDecl -> [RenderTree]
+renderValueDeclProps :: QualContext -> ValueDecl -> [Free Render ()]
 renderValueDeclProps qc = valueDeclProps qc
 
-renderTypeDeclProps :: QualContext -> TypeDecl -> [RenderTree]
+renderTypeDeclProps :: QualContext -> TypeDecl -> [Free Render ()]
 renderTypeDeclProps qc = typeDeclProps qc
 
 
-valueDeclProps :: QualContext -> ValueDecl -> [RenderTree]
+valueDeclProps :: QualContext -> ValueDecl -> [Free Render ()]
 valueDeclProps qc vd =
     [ renderValueDeclInfo $ vdInfo vd
-    , Node "::" [renderType qc $ vdType vd]
+    , node "::" [renderType qc $ vdType vd]
     ]
 
-renderValueDeclInfo :: ValueDeclInfo -> RenderTree
+renderValueDeclInfo :: ValueDeclInfo -> Free Render ()
 renderValueDeclInfo i = case i of
     Identifier ->
-        pure "[identifier]"
+        line "[identifier]"
     PatternSyn ->
-        pure "[pattern synonym]"
+        line "[pattern synonym]"
     DataCon fields ->
-        Node "[data constructor]" (map (pure . rawName) fields)
+        node "[data constructor]" (map (line . rawName) fields)
 
 
-typeDeclProps :: QualContext -> TypeDecl -> [RenderTree]
+typeDeclProps :: QualContext -> TypeDecl -> [Free Render ()]
 typeDeclProps qc td =
     [ renderTypeDeclInfo $ tdInfo td
     , renderKind qc $ tdKind td
     ]
 
-renderTypeDeclInfo :: TypeDeclInfo -> RenderTree
+renderTypeDeclInfo :: TypeDeclInfo -> Free Render ()
 renderTypeDeclInfo i = case i of
     DataType Abstract ->
-        pure "[abstract data type]"
+        line "[abstract data type]"
     DataType (DataConList dataCons) ->
-        Node "[data type]" (map (pure . rawName) dataCons)
+        node "[data type]" (map (line . rawName) dataCons)
     TypeSyn s ->
-        Node "[type synonym]" [ pure s ]
+        node "[type synonym]" [ line s ]
     TypeClass ->
-        pure "[class]"
+        line "[class]"
 
-renderKind :: QualContext -> Kind -> RenderTree
-renderKind qc k = pure $ ":: " ++ pprintKind qc k
+renderKind :: QualContext -> Kind -> Free Render ()
+renderKind qc k = line $ ":: " ++ pprintKind qc k
 
 
-renderChangedExportDiff :: QualContext -> ExportDiff -> Maybe RenderTree
+renderChangedExportDiff :: QualContext -> ExportDiff -> Maybe (Free Render ())
 renderChangedExportDiff qc ed = case ed of
     SameReExport{} -> Nothing
     DiffReExport e -> Just $ renderElem' renderReExport e
@@ -149,12 +181,12 @@ renderChangedExportDiff qc ed = case ed of
         | isElemChanged (unName dt) -> Just $ renderElemTypeDeclDiff qc dt
         | otherwise -> Nothing
   where
-    renderReExport q = [pure $ resolveQual qc q]
+    renderReExport q = [line $ resolveQual qc q]
 
 renderElemValueDeclDiff ::
     QualContext ->
     Named (Elem ValueDeclDiff ValueDecl) ->
-    RenderTree
+    Free Render ()
 renderElemValueDeclDiff qc =
     renderNamed $ \e ->
         [ renderElem (renderValueDeclDiff qc) (renderValueDeclProps qc) e ]
@@ -162,93 +194,96 @@ renderElemValueDeclDiff qc =
 renderElemTypeDeclDiff ::
     QualContext ->
     Named (Elem TypeDeclDiff TypeDecl) ->
-    RenderTree
+    Free Render ()
 renderElemTypeDeclDiff qc n =
-    Node (rawName n)
+    node (rawName n)
         [ renderElem (renderTypeDeclDiff qc) (renderTypeDeclProps qc) e ]
   where
     e = unName n
 
 
-renderChange :: (a -> RenderTree) -> Change a -> RenderTree
+renderChange :: (a -> Free Render ()) -> Change a -> Free Render ()
 renderChange r c = case c of
     Same a -> r a   -- as if no `Change` were present
     Change a b ->
-        Node "[change]"
-            [ Node "-" [r a]
-            , Node "+" [r b]
+        node "[change]"
+            [ color ANSI.Red $ node "-" [r a]
+            , color ANSI.Green $ node "+" [r b]
             ] 
 
 
-renderValueDeclDiff :: QualContext -> ValueDeclDiff -> RenderTree
+renderValueDeclDiff :: QualContext -> ValueDeclDiff -> Free Render ()
 renderValueDeclDiff qc (ValueDeclDiff t i) =
-    Node "[ValueDeclDiff]"
+    node "[ValueDeclDiff]"
         [ renderChange renderValueDeclInfo i
         , renderTypeDiff qc t
         ]
 
-renderTypeDeclDiff :: QualContext -> TypeDeclDiff -> RenderTree
+renderTypeDeclDiff :: QualContext -> TypeDeclDiff -> Free Render ()
 renderTypeDeclDiff qc (TypeDeclDiff k i) =
-    Node "[TypeDeclDiff]"
+    node "[TypeDeclDiff]"
         [ renderChange renderTypeDeclInfo i
         , renderChange (renderKind qc) k
         ]
 
 
-renderElem :: (c -> RenderTree) -> (a -> [RenderTree]) -> Elem c a -> RenderTree
+renderElem ::
+    (c -> Free Render ()) ->
+    (a -> [Free Render ()]) ->
+    Elem c a -> Free Render ()
 renderElem rc ra e = case e of
-    Added a   -> Node "[added]" (ra a)
-    Removed a -> Node "[removed]" (ra a)
+    Added a   -> color ANSI.Green $ node "[added]" (ra a)
+    Removed a -> color ANSI.Red $ node "[removed]" (ra a)
     Changed c -> rc c
 
-renderElem' :: (a -> [RenderTree]) -> Elem' a -> RenderTree
+renderElem' :: (a -> [Free Render ()]) -> Elem' a -> Free Render ()
 renderElem' = renderElem absurd
 
 
-renderType :: QualContext -> Type -> RenderTree
+renderType :: QualContext -> Type -> Free Render ()
 renderType qc = para (paraRenderTypeF qc)
 
 
-renderTypeDiff :: QualContext -> TypeDiff -> RenderTree
+renderTypeDiff :: QualContext -> TypeDiff -> Free Render ()
 renderTypeDiff qc td = case iterTypeDiff td of
     Left (Replace a b) ->
-        Node "[change]"
-            [ Node "-" [renderType qc a]
-            , Node "+" [renderType qc b]
+        node "[change]"
+            [ color ANSI.Red $ node "-" [renderType qc a]
+            , color ANSI.Green $ node "+" [renderType qc b]
             ]
     Right f -> renderTypeF qc $ fmap (renderTypeDiff qc) f
 
 
 
--- | An algebra for reducing an open type term to a RenderTree
-renderTypeF :: QualContext -> TypeF RenderTree -> RenderTree
+-- | An algebra for reducing an open type term to a Free Render ()
+renderTypeF :: QualContext -> TypeF (Free Render ()) -> Free Render ()
 renderTypeF qc t0 = case t0 of
-    VarF (TypeVar s k) -> pure s
-    ConF qual -> pure $ resolveQual qc qual
+    VarF (TypeVar s k) -> line s
+    ConF qual -> line $ resolveQual qc qual
     ApplyF c a -> 
-        Node "Apply" [c, a]
+        node "Apply" [c, a]
     --  ApplyF{} -> 
     --      let tcon : params = flattenApply t0
-    --      in Node (pprintType qc tcon) params
+    --      in node (pprintType qc tcon) params
     FunF a b ->
-        Node "(->)" [a, b]
+        node "(->)" [a, b]
     ForallF vs t ->
-        Node "Forall "
-            [ Node "[vars]" $ map (pure . pprintVar qc) vs
+        node "Forall "
+            [ node "[vars]" $ map (line . pprintVar qc) vs
             , t
             ]
     ContextF ps t ->
-        Node "Context"
-            [ Node "[preds]" $ map (pure . formatPred qc) ps
+        node "Context"
+            [ node "[preds]" $ map (line . formatPred qc) ps
             , t
             ]
 
 -- | A paramorphic version of `renderTypeF` that uses information about
 -- subterms to pretty-print type constructors.
-paraRenderTypeF :: QualContext -> TypeF (Type, RenderTree) -> RenderTree
+paraRenderTypeF :: QualContext -> TypeF (Type, Free Render ()) -> Free Render ()
 paraRenderTypeF qc t0 = case t0 of
     ApplyF (c,_) (_, a) -> 
-        Node (pprintType qc c) [a]
+        node (pprintType qc c) [a]
     _ -> renderTypeF qc $ fmap snd t0
 
 
