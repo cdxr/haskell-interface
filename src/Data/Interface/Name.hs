@@ -150,11 +150,15 @@ getQualName = fmap getName
 data Named a = Named !RawName !Origin a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-namedThing :: Named a -> a
-namedThing (Named _ _ a) = a
+named :: (HasRawName n) => n -> a -> Named a
+named n = Named (rawName n) UnknownSource
+
+unName :: Named a -> a
+unName (Named _ _ a) = a
 
 origin :: Named a -> Origin
 origin (Named _ o _) = o
+
 
 instance HasRawName (Named a) where
     rawName (Named n _ _) = n
@@ -167,11 +171,21 @@ instance HasNamespace a => HasSomeName (Named a) where
 
 -- * QualContext
 
+-- | A `QualContext` determines which names may be displayed unqualified.
 type QualContext = Set ModuleName
+-- TODO: ^ QualContext needs more info than just the Module.
+--          We should use Origins to identify built-ins.
 
 -- | A context where all names are fully qualified
 qualifyAll :: QualContext
 qualifyAll = Set.empty
+
+-- | A default `QualContext` that removes the qualifier from some primitives
+-- provided by GHC, such as "Int".
+defQualContext :: QualContext
+defQualContext = Set.fromList ["GHC.Types", "GHC.Classes", "GHC.Show"]
+-- TODO: ^ create a more comprehensive list
+--          (maybe base this on Origin rather than module)
 
 -- | The qualified or unqualified name, depending on context.
 resolveQual :: (HasRawName n) => QualContext -> Qual n -> String

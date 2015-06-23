@@ -215,30 +215,35 @@ makeLocalExport :: GHC.TyThing -> LoadModule Export
 makeLocalExport thing = case thing of
     ACoAxiom{} -> error "makeLocalExport: ACoAxiom unimplemented"
     AnId a ->                                       -- value
-        mkValueDecl . Value <$> makeType (idType a)
+        mkValueDecl Identifier <$> makeType (idType a)
     AConLike (ConLike.RealDataCon dcon) ->          -- data constructor
-        mkValueDecl <$> makeDataCon dcon
+        mkValueDecl (DataCon $ makeDataFields dcon)
+            <$> makeType (dataConType dcon)
             -- DataCon (makeType $ dataConType dcon) (makeDataConList dcon)
     AConLike (ConLike.PatSynCon patsyn) ->          -- pattern synonym
-        mkValueDecl . PatternSyn <$> makeType (PatSyn.patSynType patsyn)
+        mkValueDecl PatternSyn <$> makeType (PatSyn.patSynType patsyn)
     ATyCon tyCon
         | Just rhs <- synTyConRhs_maybe tyCon ->    -- type synonyms
-            mkTypeDecl tyCon . TypeSyn kind =<< pprGHC rhs
+            mkTypeDecl tyCon . TypeSyn =<< pprGHC rhs
         | isClassTyCon tyCon ->                     -- class definitions
-            mkTypeDecl tyCon $ TypeClass kind
+            mkTypeDecl tyCon TypeClass
         | otherwise ->                              -- data/newtype/other
-            mkTypeDecl tyCon $ Interface.DataType kind (makeDataConList tyCon)
-      where
-        kind = makeKind $ TyCon.tyConKind tyCon
+            mkTypeDecl tyCon $ Interface.DataType (makeDataConList tyCon)
   where
     thingName = GHC.getName thing
 
-    mkValueDecl :: ValueDecl -> Export
-    mkValueDecl = LocalValue . makeNamed thingName
+    mkValueDecl :: ValueDeclInfo -> Interface.Type -> Export
+    mkValueDecl i t = LocalValue $ makeNamed thingName $ ValueDecl t i
 
-    mkTypeDecl :: GHC.TyCon -> TypeDecl -> LoadModule Export
-    mkTypeDecl tyCon typeDecl = do
-        pure $ LocalType $ makeNamed thingName typeDecl
+    mkTypeDecl :: GHC.TyCon -> TypeDeclInfo -> LoadModule Export
+    mkTypeDecl tyCon info =
+        let kind = makeKind $ TyCon.tyConKind tyCon
+        in pure $ LocalType $ makeNamed thingName $ TypeDecl kind info
+
+    makeDataFields :: GHC.DataCon -> [DataField]
+    makeDataFields = map mkField . dataConFieldLabels
+      where
+        mkField lbl = makeNamed lbl ()
 
 
 -- | Construct a `Interface.Type` to be included in a `ModuleInterface`.
@@ -342,21 +347,10 @@ makeTypeCon ghcTyCon = do
     --  | isPromotedDataCon tc = 
 
 
-makeDataCon :: GHC.DataCon -> LoadModule ValueDecl
-makeDataCon dcon = DataCon <$> makeType ghcType <*> pure fields
-  where
-    ghcType = dataConType dcon
-    fields = map mkField (dataConFieldLabels dcon)
-    mkField lbl = makeNamed lbl ()
-
-
 makeDataConList :: GHC.TyCon -> DataConList
 makeDataConList tc
     | TyCon.isAbstractTyCon tc = Abstract
-    | otherwise = DataConList $ map mkDataCon (tyConDataCons tc)
-  where
-    mkDataCon :: GHC.DataCon -> Named ()
-    mkDataCon dc = makeNamed dc ()
+    | otherwise = DataConList $ map makeRawName (tyConDataCons tc)
 
 
 -- TODO: promoted types

@@ -11,6 +11,7 @@ import Data.Interface.Module
 import Data.Interface.Name
 import Data.Interface.Change
 import Data.Interface.Type
+import Data.Interface.Type.Diff
 
 
 -- | A record of all changes and non-changes to a `ModuleInterface`.
@@ -46,25 +47,38 @@ diffModules a b = ModuleDiff
 --   this requires factoring out the ModuleName parameter from diffExports
 
 data ExportDiff
-    = DiffValue (Elem ValueDeclChange (Named ValueDecl))
-    | DiffType (Elem TypeDeclChange (Named TypeDecl))
+    = DiffValue (Named (Elem ValueDeclDiff ValueDecl))
+    | DiffType (Named (Elem TypeDeclDiff TypeDecl))
     | SameReExport ExportName
     | DiffReExport (Elem' ExportName)
     deriving (Show, Eq, Ord)
 
-type ValueDeclChange = Change (Named ValueDecl)  -- TODO
-
-{-
-data ValueDeclChange =
-    ValueDeclChange TypeDiff  -- TODO needs additional data
-
-instance Diff ValueDeclChange ValueDecl where
-    diff a b = ValueDeclChange $ diff a b
-    toChange (ValueDeclChange tdiff) = toChange
--}
 
 
-type TypeDeclChange = Change (Named TypeDecl)    -- TODO
+data ValueDeclDiff = ValueDeclDiff TypeDiff (Change ValueDeclInfo)
+    deriving (Show, Eq, Ord)
+
+instance Diff ValueDecl ValueDeclDiff where
+    diff (ValueDecl ta ia) (ValueDecl tb ib) =
+        ValueDeclDiff (diff ta tb) (diff ia ib)
+
+    toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
+
+    isChanged (ValueDeclDiff t i) = isChanged i || isChanged t
+
+
+
+data TypeDeclDiff = TypeDeclDiff (Change Kind) (Change TypeDeclInfo)
+    deriving (Show, Eq, Ord)
+
+instance Diff TypeDecl TypeDeclDiff where
+    diff (TypeDecl ka ia) (TypeDecl kb ib) =
+        TypeDeclDiff (diff ka kb) (diff ia ib)
+
+    toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
+
+
+
 
 diffExports :: (ModuleName, [Export]) -> [Export] -> [ExportDiff]
 diffExports (modName, es0) =
@@ -81,25 +95,45 @@ diffExports (modName, es0) =
           [Export] ->                   -- new exports
           [ExportDiff]                  -- list of export differences
     go (vds, tds, res) es1 = case es1 of
-        [] -> map (DiffValue . Removed) (toList vds)
-           ++ map (DiffType . Removed) (toList tds)
+        -- [] -> map (\vd -> DiffValue (rawName vd) . Removed $ unName vd)
+        [] -> map (DiffValue . fmap Removed) (toList vds)
+           ++ map (DiffType . fmap Removed) (toList tds)
            ++ map (DiffReExport . Removed) (toList res)
         e:es -> case e of
             LocalValue vd1
                 | Just vd0 <- lookupName vd1 vds ->
-                    DiffValue (Changed (diff vd0 vd1))
+                    DiffValue (named vd1 (Changed (on diff unName vd0 vd1)))
                         : go (deleteName vd0 vds, tds, res) es
                 | otherwise ->
-                    DiffValue (Added vd1) : go (vds, tds, res) es
+                    DiffValue (fmap Added vd1) : go (vds, tds, res) es
             LocalType td1
                 | Just td0 <- lookupName td1 tds ->
-                    DiffType (Changed (diff td0 td1))
+                    DiffType (named td1 (Changed (on diff unName td0 td1)))
                         : go (vds, deleteName td0 tds, res) es
                 | otherwise ->
-                    DiffType (Added td1) : go (vds, tds, res) es
+                    DiffType (fmap Added td1) : go (vds, tds, res) es
             -- assume re-exports with the same name are equal
             ReExport n1
                 | Just n0 <- lookupName n1 res ->
                     SameReExport n1 : go (vds, tds, deleteName n0 res) es
                 | otherwise ->
                     DiffReExport (Added n1) : go (vds, tds, res) es
+
+
+instance HasRawName ExportDiff where
+    rawName ed = case ed of
+        DiffValue n -> rawName n
+        DiffType n -> rawName n
+        SameReExport n -> rawName n
+        DiffReExport (Added n) -> rawName n
+        DiffReExport (Removed n) -> rawName n
+
+instance HasNamespace ExportDiff where
+    namespace ed = case ed of
+        DiffValue{} -> Values
+        DiffType{} -> Types
+        SameReExport n -> namespace n
+        DiffReExport (Added n) -> namespace n
+        DiffReExport (Removed n) -> namespace n
+
+instance HasSomeName ExportDiff where

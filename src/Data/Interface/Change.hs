@@ -29,6 +29,13 @@ import qualified Data.Map as Map
 data Change a = Same a | Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
+instance Applicative Change where
+    pure = Same
+
+    Same f <*> c = f <$> c
+    Change f0 f1 <*> Same a = Change (f0 a) (f1 a)
+    Change f0 f1 <*> Change a0 a1 = Change (f0 a0) (f1 a1)
+
 
 -- | @Replace a@ is like @Change a@, except that the values are always
 -- considered different. It should appear in contexts where the values have

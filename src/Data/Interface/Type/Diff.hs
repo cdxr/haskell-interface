@@ -21,7 +21,7 @@ import Data.Interface.Type.Type
 -- @c@ is a type change (containing a pair of potentially-different types)
 data DiffTypeF t c
     = DiffTypeF (Replace (TypeF t))   -- ^ TypeF is changed
-    | SameTypeF (TypeF c)             -- ^ TypeF is not changed (@a@ might be)
+    | SameTypeF (TypeF c)             -- ^ TypeF is not changed (@c@ might be)
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
@@ -37,6 +37,8 @@ instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
                     (fmap new fc)
         DiffTypeF r -> toChange r
 
+    -- TODO implement fast `isChanged` method for DiffTypeF
+
 
 -- | Compare two open type terms.
 diffTypeF :: (Diff a c) => TypeF a -> TypeF a -> DiffTypeF a c
@@ -46,7 +48,11 @@ diffTypeF a b = case (a, b) of
     (ApplyF c0 a0, ApplyF c1 a1) ->
         SameTypeF $ ApplyF (diff c0 c1) (diff a0 a1)
     (FunF a0 b0, FunF a1 b1) ->
-        SameTypeF $ FunF (diff a0 a1) (diff b0 b1)
+        let a' = diff a0 a1
+            b' = diff b0 b1
+        in if isChanged a' && isChanged b'
+                then DiffTypeF (Replace a b)
+                else SameTypeF $ FunF a' b'
     (VarF v0, VarF v1) | v0 == v1 ->
         SameTypeF $ VarF v1
     (ForallF vs0 t0, ForallF vs1 t1) | vs0 == vs1 ->
@@ -57,7 +63,7 @@ diffTypeF a b = case (a, b) of
 
 {- diffTypeF notes:
      - Type constructors are considered equal if they have the same name and
-       origin.
+       module of origin.
      - Contexts are only considered equal if they have the same predicates
        with the same variables in exactly the same order.
        This should be improved.

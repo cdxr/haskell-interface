@@ -90,11 +90,10 @@ data TypeCon = TypeCon
     { typeConName   :: RawName
     , typeConOrigin :: Origin
     , typeConKind   :: Kind
-    , typeConIntro  :: TypeConIntro
+    , typeConInfo   :: TypeConInfo
     } deriving (Show, Eq, Ord)
 
--- | The introducer of a type constructor
-data TypeConIntro
+data TypeConInfo
     = ConAlgebraic   -- ^ data/newtype declaration
     | ConSynonym     -- ^ type synonym
     | ConClass       -- ^ class declaration

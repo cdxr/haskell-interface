@@ -46,11 +46,13 @@ printRenderTree indentSize =
 
 
 renderTypeCon :: TypeCon -> RenderTree
-renderTypeCon (TypeCon name origin kind intro) =
+renderTypeCon (TypeCon name origin kind info) =
     Node (name ++ " :: " ++ showKind kind)
-        [ Node introString [], Node (formatOrigin origin) [] ]
+        [ pure infoString
+        , Node (formatOrigin origin) []
+        ]
   where
-    introString = case intro of
+    infoString = case info of
         ConAlgebraic -> "[algebraic]"
         ConSynonym   -> "[synonym]"
         ConClass     -> "[class]"
@@ -71,58 +73,69 @@ formatSomeName q = showQualName q ++ case namespace q of
     Types -> " (type)"
 
 formatPred :: QualContext -> Pred -> String
-formatPred qc p = case p of
-    ClassPred q t -> unwords $ [resolveQual qc q, show t]  -- TODO
-    EqPred{} -> show p  -- TODO
+formatPred = pprintPred
 
 
 renderExport :: QualContext -> Export -> RenderTree
 renderExport qc e = case e of
-    LocalValue vd -> renderValueDecl qc vd
-    LocalType td  -> renderTypeDecl qc td
+    LocalValue vd -> renderNamedValueDecl qc vd
+    LocalType td  -> renderNamedTypeDecl qc td
     ReExport q    -> Node (formatSomeName q) []
 
 
 renderNamed :: (a -> [RenderTree]) -> Named a -> RenderTree
-renderNamed f (Named n o a) = Node n (pure (formatOrigin o) : f a)
+renderNamed f (Named n _ a) = Node n (f a)
 
 
-renderValueDecl :: QualContext -> Named ValueDecl -> RenderTree
-renderValueDecl = renderNamed . valueDeclProps
+renderNamedValueDecl :: QualContext -> Named ValueDecl -> RenderTree
+renderNamedValueDecl = renderNamed . valueDeclProps
+
+renderNamedTypeDecl :: QualContext -> Named TypeDecl -> RenderTree
+renderNamedTypeDecl = renderNamed . typeDeclProps
 
 
-renderTypeDecl :: QualContext -> Named TypeDecl -> RenderTree
-renderTypeDecl = renderNamed . typeDeclProps
+renderValueDeclProps :: QualContext -> ValueDecl -> [RenderTree]
+renderValueDeclProps qc = valueDeclProps qc
+
+renderTypeDeclProps :: QualContext -> TypeDecl -> [RenderTree]
+renderTypeDeclProps qc = typeDeclProps qc
 
 
 valueDeclProps :: QualContext -> ValueDecl -> [RenderTree]
-valueDeclProps qc vd = [info, Node "::" [renderType qc t] ]
-  where
-    t = typeOf vd
+valueDeclProps qc vd =
+    [ renderValueDeclInfo $ vdInfo vd
+    , Node "::" [renderType qc $ vdType vd]
+    ]
 
-    info = case vd of
-        Value{} ->
-            pure "[identifier]"
-        PatternSyn{} ->
-            pure "[pattern synonym]"
-        DataCon _ fields ->
-            Node "[data constructor]" (map (pure . rawName) fields)
+renderValueDeclInfo :: ValueDeclInfo -> RenderTree
+renderValueDeclInfo i = case i of
+    Identifier ->
+        pure "[identifier]"
+    PatternSyn ->
+        pure "[pattern synonym]"
+    DataCon fields ->
+        Node "[data constructor]" (map (pure . rawName) fields)
 
 
 typeDeclProps :: QualContext -> TypeDecl -> [RenderTree]
-typeDeclProps qc td = [info, Node "::" [pure $ pprintKind qc k] ]
-  where
-    k = kindOf td
+typeDeclProps qc td =
+    [ renderTypeDeclInfo $ tdInfo td
+    , renderKind qc $ tdKind td
+    ]
 
-    info = case td of
-        DataType _ Abstract ->
-            pure "[abstract data type]"
-        DataType _ (DataConList dataCons) ->
-            Node "[data type]" (map (pure . rawName) dataCons)
-        TypeSyn _ s ->
-            Node "[type synonym]" [ pure s ]
-        TypeClass{} ->
-            pure "[class]"
+renderTypeDeclInfo :: TypeDeclInfo -> RenderTree
+renderTypeDeclInfo i = case i of
+    DataType Abstract ->
+        pure "[abstract data type]"
+    DataType (DataConList dataCons) ->
+        Node "[data type]" (map (pure . rawName) dataCons)
+    TypeSyn s ->
+        Node "[type synonym]" [ pure s ]
+    TypeClass ->
+        pure "[class]"
+
+renderKind :: QualContext -> Kind -> RenderTree
+renderKind qc k = pure $ ":: " ++ pprintKind qc k
 
 
 renderChangedExportDiff :: QualContext -> ExportDiff -> Maybe RenderTree
@@ -130,36 +143,65 @@ renderChangedExportDiff qc ed = case ed of
     SameReExport{} -> Nothing
     DiffReExport e -> Just $ renderElem' renderReExport e
     DiffValue dv
-        | isElemChanged dv ->
-            Just $ renderElem (renderValueDeclChange qc)
-                              (renderValueDecl qc)
-                              dv
+        | isElemChanged (unName dv) -> Just $ renderElemValueDeclDiff qc dv
         | otherwise -> Nothing
     DiffType dt
-        | isElemChanged dt ->
-            Just $ renderElem (renderTypeDeclChange qc)
-                              (renderTypeDecl qc)
-                              dt
+        | isElemChanged (unName dt) -> Just $ renderElemTypeDeclDiff qc dt
         | otherwise -> Nothing
   where
-    renderReExport = pure . resolveQual qc
+    renderReExport q = [pure $ resolveQual qc q]
+
+renderElemValueDeclDiff ::
+    QualContext ->
+    Named (Elem ValueDeclDiff ValueDecl) ->
+    RenderTree
+renderElemValueDeclDiff qc =
+    renderNamed $ \e ->
+        [ renderElem (renderValueDeclDiff qc) (renderValueDeclProps qc) e ]
+
+renderElemTypeDeclDiff ::
+    QualContext ->
+    Named (Elem TypeDeclDiff TypeDecl) ->
+    RenderTree
+renderElemTypeDeclDiff qc n =
+    Node (rawName n)
+        [ renderElem (renderTypeDeclDiff qc) (renderTypeDeclProps qc) e ]
+  where
+    e = unName n
 
 
-renderValueDeclChange :: QualContext -> ValueDeclChange -> RenderTree
-renderValueDeclChange _ = pure . show  -- TODO
+renderChange :: (a -> RenderTree) -> Change a -> RenderTree
+renderChange r c = case c of
+    Same a -> r a   -- as if no `Change` were present
+    Change a b ->
+        Node "[change]"
+            [ Node "-" [r a]
+            , Node "+" [r b]
+            ] 
 
-renderTypeDeclChange :: QualContext -> TypeDeclChange -> RenderTree
-renderTypeDeclChange _ = pure . show  -- TODO
+
+renderValueDeclDiff :: QualContext -> ValueDeclDiff -> RenderTree
+renderValueDeclDiff qc (ValueDeclDiff t i) =
+    Node "[ValueDeclDiff]"
+        [ renderChange renderValueDeclInfo i
+        , renderTypeDiff qc t
+        ]
+
+renderTypeDeclDiff :: QualContext -> TypeDeclDiff -> RenderTree
+renderTypeDeclDiff qc (TypeDeclDiff k i) =
+    Node "[TypeDeclDiff]"
+        [ renderChange renderTypeDeclInfo i
+        , renderChange (renderKind qc) k
+        ]
 
 
-
-renderElem :: (c -> RenderTree) -> (a -> RenderTree) -> Elem c a -> RenderTree
+renderElem :: (c -> RenderTree) -> (a -> [RenderTree]) -> Elem c a -> RenderTree
 renderElem rc ra e = case e of
-    Added a   -> Node "[added]" [ ra a ]
-    Removed a -> Node "[removed]" [ ra a ]
+    Added a   -> Node "[added]" (ra a)
+    Removed a -> Node "[removed]" (ra a)
     Changed c -> rc c
 
-renderElem' :: (a -> RenderTree) -> Elem' a -> RenderTree
+renderElem' :: (a -> [RenderTree]) -> Elem' a -> RenderTree
 renderElem' = renderElem absurd
 
 

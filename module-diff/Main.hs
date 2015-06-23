@@ -57,7 +57,7 @@ dumpModuleInterface iface = do
     putStrLn "Exposed type constructors:\n"
     forM_ (moduleTypeCons iface) $ render . renderTypeCon
 
-    let qc = qualifyAll  -- TODO: set `QualContext`
+    let qc = defQualContext  -- TODO: set `QualContext`
 
     putStrLn "Module exports:\n"
     forM_ (compileModuleExports iface) $ render . renderExport qc
@@ -106,7 +106,7 @@ reportResult res = do
         , "************************************"
         ]
 
-    let qc = qualifyAll  -- TODO store a `QualifyContext` in the `Result`
+    let qc = defQualContext  -- TODO store a `QualifyContext` in the `Result`
 
     mapM_ renderTree . mapMaybe (renderChangedExportDiff qc) $
         diffModuleExports $ theModuleDiff res
