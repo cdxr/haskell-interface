@@ -13,7 +13,7 @@ import Data.Bifunctor
 import Data.Function ( on )
 import Data.Monoid
 
-import Data.Void ( Void )
+import Data.Void ( Void, absurd )
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
@@ -120,8 +120,17 @@ isElemChanged e = case e of
     Added{}   -> True
     Changed c -> isChanged c
 
+
 -- | An `Elem` that can never represent a change, only an addition or removal.
 type Elem' = Elem Void
+
+-- | Recover the @a@ when you don't care whether it was added or removed.
+extractElem :: Elem' a -> a
+extractElem e = case e of
+    Removed a -> a
+    Added a   -> a
+    Changed c -> absurd c
+
 
 -- | An @Elem (Change a) a@.
 -- This is named for the class instance @Diff a (Change a)@, which uses the

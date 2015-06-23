@@ -121,19 +121,14 @@ diffExports (modName, es0) =
 
 
 instance HasRawName ExportDiff where
-    rawName ed = case ed of
-        DiffValue n -> rawName n
-        DiffType n -> rawName n
-        SameReExport n -> rawName n
-        DiffReExport (Added n) -> rawName n
-        DiffReExport (Removed n) -> rawName n
+    rawName = rawName . someName
 
 instance HasNamespace ExportDiff where
-    namespace ed = case ed of
-        DiffValue{} -> Values
-        DiffType{} -> Types
-        SameReExport n -> namespace n
-        DiffReExport (Added n) -> namespace n
-        DiffReExport (Removed n) -> namespace n
+    namespace = namespace . someName
 
 instance HasSomeName ExportDiff where
+    someName ed = case ed of
+        DiffValue n -> SomeName Values (rawName n)
+        DiffType n  -> SomeName Types (rawName n)
+        SameReExport n -> someName n 
+        DiffReExport e -> someName $ extractElem e
