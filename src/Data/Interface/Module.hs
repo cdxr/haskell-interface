@@ -5,6 +5,7 @@ module Data.Interface.Module
   , ExportName
   , ClassInstance(..)
   , emptyModuleInterface
+  , lookupOrigin
 -- ** Exports
   , Export(..)
   , compileModuleExports
@@ -16,11 +17,15 @@ module Data.Interface.Module
  )
 where
 
-import Data.Maybe ( catMaybes, mapMaybe )
+import Data.Maybe ( catMaybes, mapMaybe, fromMaybe )
+
+import Data.Map ( Map )
+import qualified Data.Map as Map
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
+import Data.Interface.Source
 import Data.Interface.Name
 import Data.Interface.Type
 
@@ -41,7 +46,10 @@ data ModuleInterface = ModuleInterface
     , moduleExportList :: ![ExportName]
     , moduleInstances  :: !(Set ClassInstance)
 
- -- , moduleDepends    :: !(Set ModuleName) -- cached list of dependencies
+    , moduleOrigins :: Map SomeName Origin
+        -- ^ origins of _all_ entities referenced in this interface
+
+ -- , moduleDepends :: !(Set ModuleName) -- cached list of dependencies  TODO
     } deriving (Show)
 
 
@@ -69,7 +77,13 @@ emptyModuleInterface modName = ModuleInterface
     , moduleTypeDecls  = emptyNameMap
     , moduleExportList = []
     , moduleInstances  = Set.empty
+    , moduleOrigins    = Map.empty
     }
+
+
+lookupOrigin :: (HasSomeName n) => n -> ModuleInterface -> Origin
+lookupOrigin n =
+    fromMaybe UnknownSource . Map.lookup (someName n) . moduleOrigins
 
 
 data Export

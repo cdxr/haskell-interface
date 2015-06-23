@@ -16,8 +16,6 @@ import qualified Data.Set as Set
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
-import Data.Interface.Source
-
 
 -- * Name Types
 
@@ -147,24 +145,21 @@ getQualName = fmap getName
 
 -- * Named
 
-data Named a = Named !RawName !Origin a
+data Named a = Named !RawName a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 named :: (HasRawName n) => n -> a -> Named a
-named n = Named (rawName n) UnknownSource
+named n = Named (rawName n)
 
 unName :: Named a -> a
-unName (Named _ _ a) = a
-
-origin :: Named a -> Origin
-origin (Named _ o _) = o
+unName (Named _ a) = a
 
 
 instance HasRawName (Named a) where
-    rawName (Named n _ _) = n
+    rawName (Named n _) = n
 
 instance HasNamespace a => HasNamespace (Named a) where
-    namespace (Named _ _ a) = namespace a
+    namespace (Named _ a) = namespace a
 
 instance HasNamespace a => HasSomeName (Named a) where
 

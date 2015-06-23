@@ -84,7 +84,7 @@ renderExport qc e = case e of
 
 
 renderNamed :: (a -> [RenderTree]) -> Named a -> RenderTree
-renderNamed f (Named n _ a) = Node n (f a)
+renderNamed f (Named n a) = Node n (f a)
 
 
 renderNamedValueDecl :: QualContext -> Named ValueDecl -> RenderTree

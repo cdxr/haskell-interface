@@ -6,6 +6,7 @@ import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 
 import GHC
@@ -88,10 +89,12 @@ data LoadModuleState = LMS
         -- ^ the module that we are currently modeling an interface for
     , lmsExposedTyCons :: UniqSet GHC.TyCon
         -- ^ exposed type constructors that we have encountered so far
+    , lmsOrigins       :: Map.Map SomeName Interface.Origin
+        -- ^ origins for every entity
     }
 
 initLMState :: LoadModuleState
-initLMState = LMS emptyTypeEnv Nothing emptyUniqSet
+initLMState = LMS emptyTypeEnv Nothing emptyUniqSet Map.empty
 
 
 newtype LoadModule a = LoadModule (StateT LoadModuleState Ghc a)
@@ -153,6 +156,17 @@ seenLocalTyCons =
     filterM isLocal . uniqSetToList =<< LoadModule (gets lmsExposedTyCons)
 
 
+-- | Store an `Interface.Origin` for the given entity. This should be called
+-- for every entity that will be stored in the target `ModuleInterface`.
+storeOrigin :: (GHC.NamedThing a) => Namespace -> a -> LoadModule ()
+storeOrigin ns a = do
+    LoadModule $ modify $ \lms ->
+        lms { lmsOrigins = Map.insert name origin $ lmsOrigins lms }
+  where
+    name = SomeName ns (makeRawName a)
+    origin = makeOrigin (GHC.getName a)
+
+
 -- * Building ModuleInterfaces
 
 makeModuleInterface :: GHC.TypecheckedModule -> LoadModule ModuleInterface
@@ -186,6 +200,7 @@ makeModuleInterface tcMod = do
         , moduleTypeDecls  = nameMapFromList typeDecls
         , moduleExportList = exportList
         , moduleInstances  = Set.fromList instances
+        , moduleOrigins    = Map.empty  -- TODO
         }
   where
     loadClassInstance :: GHC.ClsInst -> LoadModule ClassInstance
@@ -379,7 +394,7 @@ tyThingNamespace tyThing = case tyThing of
 
 
 makeNamed :: (GHC.NamedThing n) => n -> a -> Named a
-makeNamed n = Named (makeRawName ghcName) (makeOrigin ghcName)
+makeNamed n = Named (makeRawName ghcName)
   where
     ghcName = GHC.getName n
 

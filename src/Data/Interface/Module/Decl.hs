@@ -24,11 +24,10 @@ import Data.Interface.Type
 
 
 data ValueDecl = ValueDecl
-    { vdType :: Type
-    , vdInfo :: ValueDeclInfo
+    { vdType   :: Type
+    , vdInfo   :: ValueDeclInfo
     } deriving (Show, Eq, Ord)
 
--- | All the data for a `ValueDecl`, except its `Type`. 
 data ValueDeclInfo
     = Identifier
     | PatternSyn
@@ -45,8 +44,8 @@ instance HasNamespace ValueDecl where
 
 
 data TypeDecl = TypeDecl
-    { tdKind :: Kind
-    , tdInfo :: TypeDeclInfo
+    { tdKind   :: Kind
+    , tdInfo   :: TypeDeclInfo
     } deriving (Show, Eq, Ord)
 
 
