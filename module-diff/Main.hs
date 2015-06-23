@@ -6,7 +6,6 @@ import Control.Monad
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 
-import Data.Foldable ( toList )
 import Data.Maybe ( mapMaybe )
 
 import qualified System.Console.ANSI as ANSI
@@ -14,42 +13,46 @@ import qualified System.Console.ANSI as ANSI
 import LoadModuleInterface   ( readModuleInterfaces )
 
 import Data.Interface
-import Data.Interface.Change
 
 import ProgramArgs
+import Builtin ( builtinTasks )
 import Render
 
 
 main :: IO ()
 main = do
     args <- parseProgramArgs
-    result <- prepareModuleDiff args
-    runReport (reportResult result) args
+
+    when (outputClassInstances args) $
+        error "--instances: unimplemented"
+
+    runTask args $ programTask args
 
 
-data Result = Result
-    { targetIds     :: (String, String)     -- ^ used to display targets
-    , theModuleDiff :: ModuleDiff
-    } deriving (Show)
+runTask :: ProgramArgs -> Task -> IO ()
+runTask args task = case task of
+    PrintInterface t ->
+        printModuleInterface =<< loadModule t
+    CompareInterfaces t0 t1 -> do
+        mdiff <- diffModules <$> loadModule t0 <*> loadModule t1
+        printModuleDiff args (t0, t1) mdiff
+    BuiltInTask s -> case lookup s builtinTasks of
+        Nothing -> error $ "not a built-in task: " ++ s
+        Just t -> runTask args t
+    RunTestModule _ ->
+        error "--test: unimplemented"
 
 
-prepareModuleDiff :: ProgramArgs -> IO Result
-prepareModuleDiff args = do
-    mdiff <- diffModules <$> loadModule mod0 <*> loadModule mod1
-    pure $ Result (mod0, mod1) mdiff
-  where
-    Target mod0 mod1 = programTarget args
-
-    loadModule :: String -> IO ModuleInterface
-    loadModule target = do
-        [modif] <- readModuleInterfaces [target]
-        when (dumpInterfaces args) $
-            dumpModuleInterface modif
-        pure modif
+loadModule :: Target -> IO ModuleInterface
+loadModule t = do
+    is <- readModuleInterfaces [t]
+    case is of
+        [i] -> pure i
+        _ -> error "loadModule: failed to load single interface"  -- TODO
 
 
-dumpModuleInterface :: ModuleInterface -> IO ()
-dumpModuleInterface iface = do
+printModuleInterface :: ModuleInterface -> IO ()
+printModuleInterface iface = do
     putStrLn $ "\n*** Module: " ++ moduleName iface ++ " ***\n"
 
     let render a = renderStdout (indent 2) a >> putStrLn ""
@@ -61,6 +64,11 @@ dumpModuleInterface iface = do
 
     putStrLn "Module exports:\n"
     forM_ (compileModuleExports iface) $ render . renderExport qc
+
+
+printModuleDiff :: ProgramArgs -> (Target, Target) -> ModuleDiff -> IO ()
+printModuleDiff args ts mdiff =
+    runReport (reportModuleDiff ts mdiff) args
 
 
 newtype Report a = Report (ReaderT ProgramArgs IO a)
@@ -89,9 +97,8 @@ renderTree rt = Report . lift $
     renderStdout (indent 2) rt >> putStrLn ""
 
 
-reportResult :: Result -> Report ()
-reportResult res = do
-    let (t0, t1) = targetIds res
+reportModuleDiff :: (Target, Target) -> ModuleDiff -> Report ()
+reportModuleDiff (t0, t1) mdiff = do
     outputLine $ unlines
         [ ""
         , "************************************"
@@ -104,4 +111,4 @@ reportResult res = do
     let qc = defQualContext  -- TODO store a `QualifyContext` in the `Result`
 
     mapM_ renderTree . mapMaybe (renderChangedExportDiff qc) $
-        diffModuleExports $ theModuleDiff res
+        diffModuleExports mdiff

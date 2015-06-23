@@ -9,10 +9,9 @@ module Render where
 
 import Control.Monad
 import Control.Monad.Free
-import Control.Monad.Trans.Reader
 
 import Data.Void ( absurd )
-import Data.Functor.Foldable ( embed, project, cata, para )
+import Data.Functor.Foldable ( para )
 
 import Data.Interface
 import Data.Interface.Change
@@ -32,6 +31,7 @@ data RenderStyle = RenderStyle
     , incrIndent :: Int
     }
 
+defaultRenderStyle :: RenderStyle
 defaultRenderStyle = RenderStyle
     { baseIndent = 0
     , incrIndent = 2
@@ -55,15 +55,15 @@ renderStdout style renderTree = do
         Pure () -> pure ()
         Free r -> case r of
             Render s ms -> do
-                putStrLn $ indent depth s
+                putStrLn $ indentString depth s
                 forM_ ms $ go (depth+1) sgr0
             SetSGR sgr m -> do
                 putStr $ setSGRCode sgr
                 go depth sgr m
                 putStr $ setSGRCode sgr0
 
-    indent :: Int -> String -> String
-    indent d s = replicate (baseIndent + incrIndent * d) ' ' ++ s
+    indentString :: Int -> String -> String
+    indentString d s = replicate (baseIndent + incrIndent * d) ' ' ++ s
       where RenderStyle{..} = style
 
 
@@ -258,7 +258,7 @@ renderTypeDiff qc td = case iterTypeDiff td of
 -- | An algebra for reducing an open type term to a Free Render ()
 renderTypeF :: QualContext -> TypeF (Free Render ()) -> Free Render ()
 renderTypeF qc t0 = case t0 of
-    VarF (TypeVar s k) -> line s
+    VarF (TypeVar s _) -> line s
     ConF qual -> line $ resolveQual qc qual
     ApplyF c a -> 
         node "Apply" [c, a]
@@ -280,7 +280,10 @@ renderTypeF qc t0 = case t0 of
 
 -- | A paramorphic version of `renderTypeF` that uses information about
 -- subterms to pretty-print type constructors.
-paraRenderTypeF :: QualContext -> TypeF (Type, Free Render ()) -> Free Render ()
+paraRenderTypeF ::
+    QualContext ->
+    TypeF (Type, Free Render ()) ->
+    Free Render ()
 paraRenderTypeF qc t0 = case t0 of
     ApplyF (c,_) (_, a) -> 
         node (pprintType qc c) [a]
