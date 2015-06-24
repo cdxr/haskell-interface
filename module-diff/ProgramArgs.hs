@@ -24,8 +24,8 @@ parseProgramArgs =
 type Flag = Bool
 
 data ProgramArgs = ProgramArgs
-    { hideString :: Maybe String
-    , outputClassInstances :: Flag
+    { hideString :: Maybe String        -- internal
+    , outputClassInstances :: Flag      -- internal
     , programTask :: Task
     } deriving (Show, Eq, Ord)
 
