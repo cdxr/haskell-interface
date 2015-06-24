@@ -24,14 +24,16 @@ parseProgramArgs =
 type Flag = Bool
 
 data ProgramArgs = ProgramArgs
-    { outputClassInstances :: Flag
+    { hideString :: Maybe String
+    , outputClassInstances :: Flag
     , programTask :: Task
     } deriving (Show, Eq, Ord)
 
 -- | The arguments used when the program is run with no arguments
 defaultProgramArgs :: ProgramArgs
 defaultProgramArgs = ProgramArgs
-    { outputClassInstances = False
+    { hideString = Nothing
+    , outputClassInstances = False
     , programTask = BuiltInTask "test"
     }
 
@@ -48,11 +50,26 @@ data Task
 
 
 mainParser :: Parser ProgramArgs
-mainParser = ProgramArgs
-    <$> switch
-        ( long "instances"
-       <> help "Include class instances" )
+mainParser =
+  ProgramArgs
+    <$> optional opt_hide
+    <*> flag_instances
     <*> parseTask
+
+opt_hide :: Parser String
+opt_hide = option str $ mconcat
+    [ long "hide"
+    , help "Hide interface elements referencing name"
+    , metavar "NAME"
+    , internal
+    ]
+
+flag_instances :: Parser Flag
+flag_instances = switch $ mconcat
+    [ long "instances"
+    , help "Include class instances"
+    , internal
+    ]
 
 parseTask :: Parser Task
 parseTask = asum
@@ -84,12 +101,3 @@ parseBuiltinTask = BuiltInTask <$> option str fields
           <> short 'b'
           <> metavar "ID"
           <> help "Run a built-in target (development feature)"
-
-
-{-
-readBuiltinTarget :: ReadM Target
-readBuiltinTarget = str >>= \s -> case lookupBuiltinTarget s of
-    Nothing -> readerError $ "not a built-in target: " ++ s
-    Just t -> return t
--}
-

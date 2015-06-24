@@ -95,7 +95,6 @@ diffExports (modName, es0) =
           [Export] ->                   -- new exports
           [ExportDiff]                  -- list of export differences
     go (vds, tds, res) es1 = case es1 of
-        -- [] -> map (\vd -> DiffValue (rawName vd) . Removed $ unName vd)
         [] -> map (DiffValue . fmap Removed) (toList vds)
            ++ map (DiffType . fmap Removed) (toList tds)
            ++ map (DiffReExport . Removed) (toList res)
@@ -122,6 +121,11 @@ diffExports (modName, es0) =
 
 instance HasRawName ExportDiff where
     rawName = rawName . someName
+    rename f ed = case ed of
+        DiffValue n -> DiffValue $ rename f n
+        DiffType n  -> DiffType $ rename f n
+        SameReExport n -> SameReExport $ rename f n
+        DiffReExport e -> DiffReExport $ fmap (rename f) e
 
 instance HasNamespace ExportDiff where
     namespace = namespace . someName

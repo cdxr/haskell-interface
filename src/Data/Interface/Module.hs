@@ -8,6 +8,7 @@ module Data.Interface.Module
   , ClassInstance(..)
   , emptyModuleInterface
   , lookupOrigin
+  , filterInterfaceNames
 -- ** Exports
   , Export(..)
   , compileModuleExports
@@ -90,6 +91,41 @@ emptyModuleInterface modName = ModuleInterface
 lookupOrigin :: (HasSomeName n) => n -> ModuleInterface -> Origin
 lookupOrigin n =
     fromMaybe UnknownSource . Map.lookup (someName n) . moduleOrigins
+
+
+hasDecl :: SomeName -> ModuleInterface -> Bool
+hasDecl n ModuleInterface{..} = case namespace n of
+    Values | Just _ <- lookupRawName (rawName n) moduleValueDecls
+        -> True
+    Types  | Just _ <- lookupRawName (rawName n) moduleTypeDecls
+        -> True
+    _ -> False
+
+
+filterExports :: (ExportName -> Bool) -> ModuleInterface -> ModuleInterface
+filterExports f iface = iface
+    { moduleExportList = filter f $ moduleExportList iface }
+
+
+-- | Remove every interface entity containing a reference to a name that does
+-- not pass the filter.
+filterInterfaceNames :: (RawName -> Bool) -> ModuleInterface -> ModuleInterface
+filterInterfaceNames f ModuleInterface{..} =
+    let iface = ModuleInterface
+            { moduleName = moduleName
+            , moduleTypeCons   = filterMapNames f moduleTypeCons
+            , moduleValueDecls = filterMapNames f moduleValueDecls
+            , moduleTypeDecls  = filterMapNames f moduleTypeDecls
+            , moduleExportList = filter (allNames f) moduleExportList
+            , moduleInstances  = Set.filter (allNames f) moduleInstances
+            , moduleOrigins    = filterMapNames f moduleOrigins
+            }
+    in filterExports (keep iface) iface
+  where
+    keep :: ModuleInterface -> ExportName -> Bool
+    keep iface (Qual m n)
+        | m /= moduleName = True             -- keep re-exports
+        | otherwise = hasDecl n iface
 
 
 -- | module name is not included

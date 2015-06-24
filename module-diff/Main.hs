@@ -5,6 +5,7 @@ module Main where
 import Control.Monad
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
+import Control.Monad.IO.Class
 
 import Data.Maybe ( mapMaybe )
 
@@ -20,39 +21,45 @@ import Render
 
 
 main :: IO ()
-main = do
-    args <- parseProgramArgs
+main = runMain start =<< parseProgramArgs
 
-    when (outputClassInstances args) $
+
+start :: Main ()
+start = do
+    whenFlag_ outputClassInstances $
         error "--instances: unimplemented"
 
-    runTask args $ programTask args
+    runTask =<< Main (asks programTask)
 
 
-runTask :: ProgramArgs -> Task -> IO ()
-runTask args task = case task of
+runTask :: Task -> Main ()
+runTask task = case task of
     PrintInterface t ->
         printModuleInterface =<< loadModule t
     CompareInterfaces t0 t1 -> do
         mdiff <- diffModules <$> loadModule t0 <*> loadModule t1
-        printModuleDiff args (t0, t1) mdiff
+        printModuleDiff (t0, t1) mdiff
     BuiltInTask s -> case lookup s builtinTasks of
         Nothing -> error $ "not a built-in task: " ++ s
-        Just t -> runTask args t
+        Just t -> runTask t
     RunTestModule _ ->
         error "--test: unimplemented"
 
 
-loadModule :: Target -> IO ModuleInterface
+loadModule :: Target -> Main ModuleInterface
 loadModule t = do
-    is <- readModuleInterfaces [t]
+    is <- liftIO $ readModuleInterfaces [t]
     case is of
-        [i] -> pure i
+        [iface] -> do
+            ms <- getArg hideString
+            pure $ case ms of
+                Nothing -> iface
+                Just n -> filterInterfaceNames (/= n) iface
         _ -> error "loadModule: failed to load single interface"  -- TODO
 
 
-printModuleInterface :: ModuleInterface -> IO ()
-printModuleInterface iface = do
+printModuleInterface :: ModuleInterface -> Main ()
+printModuleInterface iface = liftIO $ do
     putStrLn $ "\n*** Module: " ++ moduleName iface ++ " ***\n"
 
     let render a = renderStdout (indent 2) a >> putStrLn ""
@@ -66,39 +73,37 @@ printModuleInterface iface = do
     forM_ (compileModuleExports iface) $ render . renderExport qc
 
 
-printModuleDiff :: ProgramArgs -> (Target, Target) -> ModuleDiff -> IO ()
-printModuleDiff args ts mdiff =
-    runReport (reportModuleDiff ts mdiff) args
+newtype Main a = Main (ReaderT ProgramArgs IO a)
+    deriving (Functor, Applicative, Monad, MonadIO)
 
-
-newtype Report a = Report (ReaderT ProgramArgs IO a)
-    deriving (Functor, Applicative, Monad)
-
-runReport :: Report a -> ProgramArgs -> IO a
-runReport (Report m) args = do
+runMain :: Main a -> ProgramArgs -> IO a
+runMain (Main m) args = do
     a <- runReaderT m args
     a <$ ANSI.setSGR [ANSI.Reset]
 
-whenFlag :: (ProgramArgs -> Flag) -> Report a -> Report (Maybe a)
+getArg :: (ProgramArgs -> a) -> Main a
+getArg = Main . asks
+
+whenFlag :: (ProgramArgs -> Flag) -> Main a -> Main (Maybe a)
 whenFlag f m = do
-    b <- Report $ asks f
+    b <- Main $ asks f
     if b then Just <$> m else pure Nothing
 
-whenFlag_ :: (ProgramArgs -> Flag) -> Report a -> Report ()
+whenFlag_ :: (ProgramArgs -> Flag) -> Main a -> Main ()
 whenFlag_ f = void . whenFlag f
 
 
-outputLine :: String -> Report ()
-outputLine = Report . lift . putStrLn
+outputLine :: String -> Main ()
+outputLine = Main . lift . putStrLn
 
 
-renderTree :: RenderTree -> Report ()
-renderTree rt = Report . lift $
+renderTree :: RenderTree -> Main ()
+renderTree rt = Main . lift $
     renderStdout (indent 2) rt >> putStrLn ""
 
 
-reportModuleDiff :: (Target, Target) -> ModuleDiff -> Report ()
-reportModuleDiff (t0, t1) mdiff = do
+printModuleDiff :: (Target, Target) -> ModuleDiff -> Main ()
+printModuleDiff (t0, t1) mdiff = do
     outputLine $ unlines
         [ ""
         , "************************************"

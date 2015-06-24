@@ -5,11 +5,17 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Interface.Name where
 
 import Data.Coerce
 import Data.Functor.Identity
+import Data.Functor.Constant
+
+import Data.Profunctor.Unsafe ( (#.) )
+
+import Data.Monoid
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
@@ -231,6 +237,15 @@ renameMap :: (HasRawName a) =>
     NameMap a -> NameMap a
 renameMap ren = Map.map (rename ren) . Map.mapKeys ren
 
+-- | Remove all @(name, value)@ pairs in which @name@ or @value@ contains
+-- a name that fails to satisfay the predicate.
+filterMapNames ::
+    (TraverseNames k, TraverseNames a) =>
+    (RawName -> Bool) ->
+    Map k a -> Map k a
+filterMapNames f = Map.filterWithKey $ \k a -> allNames f k && allNames f a
+
+
 traverseNamedElements ::
     (Applicative f) =>
     (Named a -> f (Named a)) ->
@@ -252,7 +267,7 @@ traverseMapPairs f =
 
 -- * TraverseNames
 
--- | A class of types that permit a full traversal of all contained
+-- | The class of types that permit a full traversal of all contained
 -- `RawName`s.
 class TraverseNames s where
     traverseNames :: (Applicative f) => (RawName -> f RawName) -> s -> f s
@@ -261,10 +276,27 @@ class TraverseNames s where
 -- all names @n@ in a structure with @ren n@. For many structures, @ren@
 -- must be injective to preserve its shape.
 renameAll :: (TraverseNames a) => (RawName -> RawName) -> a -> a
-renameAll ren = coerce . traverseNames go
+renameAll ren = runIdentity #. traverseNames go
   where
     go :: RawName -> Identity RawName
-    go = coerce . ren
+    go = Identity #. ren
+
+foldNames :: forall a b.
+    (TraverseNames a) =>
+    (RawName -> b -> b) ->
+    b ->
+    a -> b
+foldNames f z a = appEndo (getConstant #. traverseNames go $ a) z
+  where
+    go :: RawName -> Constant (Endo b) RawName
+    go = Constant #. Endo #. f
+
+collectNames :: (TraverseNames a) => a -> [RawName]
+collectNames = foldNames (:) []
+
+allNames :: (TraverseNames a) => (RawName -> Bool) -> a -> Bool
+allNames f = foldNames ((&&) . f) True
+
 
 instance TraverseNames () where
     traverseNames _ _ = pure ()
