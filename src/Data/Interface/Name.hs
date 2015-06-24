@@ -9,12 +9,15 @@
 module Data.Interface.Name where
 
 import Data.Coerce
+import Data.Functor.Identity
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
+
+import Data.Interface.Source ( Origin )
 
 
 -- * Name Types
@@ -48,7 +51,7 @@ type ModuleName = String
 
 -- | @Qual n@ is a value of type @n@ tagged with a `ModuleName`.
 data Qual n = Qual !ModuleName !n
-    deriving (Show, Eq, Ord, Functor)
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 qualModuleName :: Qual n -> ModuleName
 qualModuleName (Qual mn _) = mn
@@ -95,21 +98,30 @@ instance (HasNamespace n) => HasNamespace (Qual n) where
 -- | Class of types that represent or contain names.
 class HasRawName n where
     rawName :: n -> RawName
+    rename :: (RawName -> RawName) -> n -> n
 
 instance HasRawName RawName where
     rawName = id
     {-# INLINABLE rawName #-}
+
+    rename = id
+    {-# INLINABLE rename #-}
 
 instance HasRawName (Name s) where
     -- rawName (Name s) = s
     rawName = coerce
     {-# INLINABLE rawName #-}
 
+    rename = coerce
+    {-# INLINABLE rename #-}
+
 instance HasRawName SomeName where
-    rawName (SomeName _ s) = s
+    rawName (SomeName _ n) = n
+    rename f (SomeName ns n) = SomeName ns (f n)
 
 instance (HasRawName n) => HasRawName (Qual n) where
     rawName (Qual _ n) = rawName n
+    rename f (Qual m n) = Qual m (rename f n)
 
 
 -- | Class of types that represent or contain namespaced-names.
@@ -157,6 +169,7 @@ unName (Named _ a) = a
 
 instance HasRawName (Named a) where
     rawName (Named n _) = n
+    rename f (Named n a) = Named (rename f n) a
 
 instance HasNamespace a => HasNamespace (Named a) where
     namespace (Named _ a) = namespace a
@@ -212,3 +225,81 @@ lookupRawName = Map.lookup
 
 deleteName :: (HasName s n, HasName s a) => n -> NameMap a -> NameMap a
 deleteName = Map.delete . rawName
+
+renameMap :: (HasRawName a) =>
+    (RawName -> RawName) ->             -- ^ injective renaming function
+    NameMap a -> NameMap a
+renameMap ren = Map.map (rename ren) . Map.mapKeys ren
+
+traverseNamedElements ::
+    (Applicative f) =>
+    (Named a -> f (Named a)) ->
+    NameMap a -> f (NameMap a)
+traverseNamedElements f =
+    traverseMapPairs (fmap pair . f . uncurry Named)
+  where
+    pair :: Named a -> (RawName, a)
+    pair (Named n a) = (n, a)
+    
+traverseMapPairs ::
+    (Applicative f, Ord k) =>
+    ((k,a) -> f (k,a)) ->
+    Map k a -> f (Map k a)
+traverseMapPairs f =
+    fmap Map.fromList . traverse f . Map.toList
+
+
+
+-- * TraverseNames
+
+-- | A class of types that permit a full traversal of all contained
+-- `RawName`s.
+class TraverseNames s where
+    traverseNames :: (Applicative f) => (RawName -> f RawName) -> s -> f s
+
+-- | When @ren@ is a function from names to names, @renameAll ren@ replaces
+-- all names @n@ in a structure with @ren n@. For many structures, @ren@
+-- must be injective to preserve its shape.
+renameAll :: (TraverseNames a) => (RawName -> RawName) -> a -> a
+renameAll ren = coerce . traverseNames go
+  where
+    go :: RawName -> Identity RawName
+    go = coerce . ren
+
+instance TraverseNames () where
+    traverseNames _ _ = pure ()
+
+instance TraverseNames RawName where
+    traverseNames = id
+    {-# INLINABLE traverseNames #-}
+
+instance TraverseNames (Name s) where
+    traverseNames f = fmap coerce . f . coerce
+    {-# INLINABLE traverseNames #-}
+
+instance (TraverseNames a) => TraverseNames (Named a) where
+    traverseNames f (Named n a) = Named <$> f n <*> traverseNames f a
+
+instance (TraverseNames k, TraverseNames a, Ord k) =>
+            TraverseNames (Map k a) where
+    traverseNames f = traverseMapPairs onPair
+      where
+        onPair (k,a) = (,) <$> traverseNames f k <*> traverseNames f a
+
+instance (TraverseNames a, Ord a) => TraverseNames (Set a) where
+    traverseNames f =
+        fmap Set.fromList . traverse (traverseNames f) . Set.toList
+
+{- TODO: after RawName is no longer synonym for [Char]
+instance (TraverseNames a) => TraverseNames [a] where
+    traverseNames f = traverse (traverseNames f)
+-}
+
+instance (TraverseNames a) => TraverseNames (Qual a) where
+    traverseNames f = traverse (traverseNames f)
+
+instance TraverseNames SomeName where
+    traverseNames f (SomeName ns n) = SomeName ns <$> f n
+
+instance TraverseNames Origin where
+    traverseNames _ = pure

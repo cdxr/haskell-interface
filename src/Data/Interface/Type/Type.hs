@@ -55,6 +55,17 @@ instance FF.Unfoldable Type where
         ForallF vs t -> Forall vs t
         ContextF ps t -> Context ps t
 
+instance TraverseNames Type where
+    traverseNames f = fmap FF.embed . traverseNames f . FF.project
+
+-- | only includes type constructors
+instance (TraverseNames a) => TraverseNames (TypeF a) where
+    traverseNames f t0 = case t0 of
+        ConF c -> ConF <$> traverseNames f c
+        ContextF ps t ->
+            ContextF <$> traverse (traverseNames f) ps <*> traverseNames f t
+        _ -> traverse (traverseNames f) t0
+
 
 -- | A "link" to a type constructor.
 --
@@ -74,6 +85,12 @@ data Pred
 -- | A choice of equality relation. Copied from GHC.Type.
 data EqRel = NomEq | ReprEq
     deriving (Show, Eq, Ord)
+
+instance TraverseNames Pred where
+    traverseNames f p = case p of
+        ClassPred q ts ->
+            ClassPred <$> traverseNames f q <*> traverse (traverseNames f) ts
+
 
 
 data TypeVar = TypeVar String Kind
@@ -103,41 +120,18 @@ type instance Space TypeCon = 'Types
 
 instance HasRawName TypeCon where
     rawName = typeConName
+    rename f tcon = tcon { typeConName = f (typeConName tcon) }
 
 instance HasNamespace TypeCon where
     namespace _ = Types
 
+instance TraverseNames TypeCon where
+    traverseNames f (TypeCon n o k i) =
+        TypeCon <$> f n
+                <*> pure o
+                <*> traverseNames f k
+                <*> pure i
 
-
-type Arity = Int
-
-data WiredType
-    = WBool
-    | WEq
-    | WOrdering
-    | WChar
-    | WDouble
-    | WFloat
-    | WInt
-    | WWord
-    | WList
-    | WTuple Arity
-    | WUnit
-    deriving (Show, Eq, Ord)
-
-wiredTypeKind :: WiredType -> Kind
-wiredTypeKind w = case w of
-    WBool     -> basicTypeConKind 0
-    WEq       -> FunKind StarKind ConstraintKind
-    WOrdering -> FunKind StarKind ConstraintKind
-    WChar     -> basicTypeConKind 0
-    WDouble   -> basicTypeConKind 0
-    WFloat    -> basicTypeConKind 0
-    WInt      -> basicTypeConKind 0
-    WWord     -> basicTypeConKind 0
-    WList     -> basicTypeConKind 1
-    WUnit     -> basicTypeConKind 0
-    WTuple a  -> basicTypeConKind a
 
 
 data Kind
@@ -151,10 +145,17 @@ data Kind
     deriving (Show, Eq, Ord)
 
 {- Kind notes:
-     TODO: GHC also has BOX, AnyK, and OpenKind
+     TODO: GHC also has AnyK and OpenKind
 -}
 
--- | Determine the result of a `FunKind`. This is a partial function.
+instance TraverseNames Kind where
+    traverseNames f k = case k of
+        PromotedType q -> PromotedType <$> traverseNames f q
+        FunKind k0 k1  -> FunKind <$> traverseNames f k0 <*> traverseNames f k1
+        _ -> pure k
+
+
+-- | Determine the codomain of a `FunKind`.
 resultKind :: Kind -> Maybe Kind
 resultKind k0 = case k0 of
     FunKind _ k -> Just k
@@ -174,6 +175,8 @@ showsKind k = case k of
 showKind :: Kind -> String
 showKind k = showsKind k ""
 
+
+type Arity = Int
 
 -- | The kind of a basic type constructor.
 basicTypeConKind :: Arity -> Kind

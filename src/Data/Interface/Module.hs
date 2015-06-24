@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Data.Interface.Module
  (
 -- * ModuleInterface
@@ -68,6 +70,10 @@ data ClassInstance = ClassInstance !ClassName [Type]
         proper `Class` type, when that is defined.
 -}
 
+instance TraverseNames ClassInstance where
+    traverseNames f (ClassInstance n ts) =
+        ClassInstance <$> f n <*> traverse (traverseNames f) ts
+
 
 emptyModuleInterface :: ModuleName -> ModuleInterface
 emptyModuleInterface modName = ModuleInterface
@@ -84,6 +90,18 @@ emptyModuleInterface modName = ModuleInterface
 lookupOrigin :: (HasSomeName n) => n -> ModuleInterface -> Origin
 lookupOrigin n =
     fromMaybe UnknownSource . Map.lookup (someName n) . moduleOrigins
+
+
+-- | module name is not included
+instance TraverseNames ModuleInterface where
+    traverseNames f ModuleInterface{..} =
+        ModuleInterface moduleName
+          <$> traverseNames f moduleTypeCons
+          <*> traverseNames f moduleValueDecls
+          <*> traverseNames f moduleTypeDecls
+          <*> traverse (traverseNames f) moduleExportList
+          <*> traverseNames f moduleInstances
+          <*> traverseNames f moduleOrigins
 
 
 data Export

@@ -166,21 +166,3 @@ formatKind k = case k of
     ConstraintKind -> string "Constraint"
     PromotedType q -> qualName q
     FunKind a b -> formatKind a <> string " -> " <> formatKind b
-
-
-showWiredType :: WiredType -> String
-showWiredType w = case w of
-    WBool     -> "Bool"
-    WEq       -> "Eq"
-    WOrdering -> "Ordering"
-    WChar     -> "Char"
-    WDouble   -> "Double"
-    WFloat    -> "Float"
-    WInt      -> "Int"
-    WWord     -> "Word"
-    WList     -> "[]"
-    WUnit     -> "()"
-    WTuple a
-        | a < 2 || a > 20 ->
-            error $ "showWiredType: tuple with arity " ++ show a
-        | otherwise -> '(' : replicate (a-1) ',' ++ ")"

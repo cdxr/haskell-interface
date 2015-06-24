@@ -42,6 +42,15 @@ type instance Space ValueDecl = 'Values
 instance HasNamespace ValueDecl where
     namespace _ = Values
 
+instance TraverseNames ValueDecl where
+    traverseNames f (ValueDecl t i) = 
+        ValueDecl <$> traverseNames f t <*> traverseNames f i
+
+instance TraverseNames ValueDeclInfo where
+    traverseNames f vdi = case vdi of
+        DataCon fields -> DataCon <$> traverse (traverseNames f) fields
+        _ -> pure vdi
+
 
 data TypeDecl = TypeDecl
     { tdKind   :: Kind
@@ -68,8 +77,22 @@ type instance Space TypeDecl = 'Types
 instance HasNamespace TypeDecl where
     namespace _ = Types
 
+instance TraverseNames TypeDecl where
+    traverseNames f (TypeDecl k i) =
+        TypeDecl <$> traverseNames f k <*> traverseNames f i
+
+instance TraverseNames TypeDeclInfo where
+    traverseNames f tdi = case tdi of
+        DataType dcons -> DataType <$> traverseNames f dcons
+        _ -> pure tdi
+
 
 -- | Data constructors for an algebraic type, or `Abstract` when the data
 -- constructors are hidden.
 data DataConList = Abstract | DataConList [RawName]
     deriving (Show, Eq, Ord)
+
+instance TraverseNames DataConList where
+    traverseNames f dcons = case dcons of
+        Abstract -> pure Abstract
+        DataConList ns -> DataConList <$> traverse (traverseNames f) ns
