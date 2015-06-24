@@ -90,6 +90,11 @@ same c = case toChange c of
     Same a -> Just a
     Change{} -> Nothing
 
+toReplace :: (Diff a c) => c -> Replace a
+toReplace c = case toChange c of
+    Same a -> Replace a a
+    Change a b -> Replace a b
+
 
 instance (Eq a) => Diff a (Change a) where
     diff a b

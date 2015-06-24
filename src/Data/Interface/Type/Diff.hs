@@ -42,24 +42,11 @@ instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
 
 -- | Compare two open type terms.
 diffTypeF :: (Diff a c) => TypeF a -> TypeF a -> DiffTypeF a c
-diffTypeF a b = case (a, b) of
-    (ConF c0, ConF c1) | c0 == c1 ->
-        SameTypeF $ ConF c1
-    (ApplyF c0 a0, ApplyF c1 a1) ->
-        SameTypeF $ ApplyF (diff c0 c1) (diff a0 a1)
-    (FunF a0 b0, FunF a1 b1) ->
-        let a' = diff a0 a1
-            b' = diff b0 b1
-        in if isChanged a' && isChanged b'
-                then DiffTypeF (Replace a b)
-                else SameTypeF $ FunF a' b'
-    (VarF v0, VarF v1) | v0 == v1 ->
-        SameTypeF $ VarF v1
-    (ForallF vs0 t0, ForallF vs1 t1) | vs0 == vs1 ->
-        SameTypeF $ ForallF vs1 (diff t0 t1)
-    (ContextF ps0 t0, ContextF ps1 t1) | ps0 == ps1 ->
-        SameTypeF $ ContextF ps1 (diff t0 t1)
-    _ -> DiffTypeF (Replace a b)
+diffTypeF a0 b0 = case diffTopTypeF a0 b0 of
+    dt@(SameTypeF (FunF a b)) | isChanged a && isChanged b -> 
+        DiffTypeF $ toReplace dt
+    dt -> dt
+
 
 {- diffTypeF notes:
      - Type constructors are considered equal if they have the same name and
@@ -70,6 +57,28 @@ diffTypeF a b = case (a, b) of
      - Type variables are compared for literal equality. Changes will have
        to be made to the TypeF type in order to compare for alpha-equality.
 -}
+
+
+-- | The first step to comparing a Type. The very top TypeF constructors are
+-- compared directly for equality, without regard to lower terms.
+diffTopTypeF :: (Diff a c) => TypeF a -> TypeF a -> DiffTypeF a c
+diffTopTypeF a b = case (a, b) of
+    (ConF c0, ConF c1) | c0 == c1 ->
+        SameTypeF $ ConF c1
+    (ApplyF c0 a0, ApplyF c1 a1) ->
+        SameTypeF $ ApplyF (diff c0 c1) (diff a0 a1)
+    (FunF a0 b0, FunF a1 b1) ->
+        SameTypeF $ FunF (diff a0 a1) (diff b0 b1)
+    (VarF v0, VarF v1) | v0 == v1 ->
+        SameTypeF $ VarF v1
+    (ForallF vs0 t0, ForallF vs1 t1) | vs0 == vs1 ->
+        SameTypeF $ ForallF vs1 (diff t0 t1)
+    (ContextF ps0 t0, ContextF ps1 t1) | ps0 == ps1 ->
+        SameTypeF $ ContextF ps1 (diff t0 t1)
+    _ -> DiffTypeF (Replace a b)
+
+
+
 
 
 type TypeDiff = FF.Fix (DiffTypeF Type)
