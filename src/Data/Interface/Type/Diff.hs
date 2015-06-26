@@ -26,18 +26,15 @@ data DiffTypeF t c
 
 instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
     diff = diffTypeF
+    {-# INLINABLE diff #-}
 
     toChange d = case d of
-        SameTypeF fc                           -- if the TypeFs are the same,
-            | Just a <- traverse same fc ->    --   check to see if each child
-                Same a                         --   is the same.
-            | otherwise ->                     -- if not, reconstruct the
-                Change                         --   and wrap them in the
-                    (fmap old fc)              --   `Change` constructor
-                    (fmap new fc)
+        SameTypeF fc -> traverse toChange fc
         DiffTypeF r -> toChange r
 
-    -- TODO implement fast `isChanged` method for DiffTypeF
+    isChanged d = case d of
+        DiffTypeF{} -> True
+        SameTypeF fc -> any isChanged fc
 
 
 -- | Compare two open type terms.

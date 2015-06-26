@@ -186,25 +186,34 @@ instance HasNamespace a => HasSomeName (Named a) where
 -- * QualContext
 
 -- | A `QualContext` determines which names may be displayed unqualified.
-type QualContext = Set ModuleName
--- TODO: ^ QualContext needs more info than just the Module.
---          We should use Origins to identify built-ins.
+data QualContext = QualContext
+    { qcModules   :: Set ModuleName
+    , qcUnqualGhc :: Bool
+    } deriving (Show)
 
 -- | A context where all names are fully qualified
 qualifyAll :: QualContext
-qualifyAll = Set.empty
+qualifyAll = QualContext Set.empty False
 
 -- | A default `QualContext` that removes the qualifier from some primitives
 -- provided by GHC, such as "Int".
 defQualContext :: QualContext
-defQualContext = Set.fromList ["GHC.Types", "GHC.Classes", "GHC.Show"]
--- TODO: ^ create a more comprehensive list
---          (maybe base this on Origin rather than module)
+defQualContext = QualContext Set.empty True
+
+unqualifyModule :: ModuleName -> QualContext -> QualContext
+unqualifyModule modName qc =
+    qc { qcModules = Set.insert modName $ qcModules qc }
+
+shouldUnqualify :: (HasRawName n) => QualContext -> Qual n -> Bool
+shouldUnqualify qc (Qual mn _) =
+    (qcUnqualGhc qc && isGhcModule mn) || mn `Set.member` qcModules qc
+  where
+    isGhcModule = (== "GHC") . takeWhile (/= '.')
 
 -- | The qualified or unqualified name, depending on context.
 resolveQual :: (HasRawName n) => QualContext -> Qual n -> String
 resolveQual qc qualName@(Qual modName n)
-    | modName `Set.member` qc = rawName n
+    | shouldUnqualify qc qualName = rawName n
     | otherwise = showQualName qualName
 
 
@@ -233,7 +242,7 @@ deleteName :: (HasName s n, HasName s a) => n -> NameMap a -> NameMap a
 deleteName = Map.delete . rawName
 
 renameMap :: (HasRawName a) =>
-    (RawName -> RawName) ->             -- ^ injective renaming function
+    (RawName -> RawName) ->             -- injective renaming function
     NameMap a -> NameMap a
 renameMap ren = Map.map (rename ren) . Map.mapKeys ren
 

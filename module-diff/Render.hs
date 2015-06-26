@@ -4,90 +4,144 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ViewPatterns #-}
+
+-- due to TypeDiff being a synonym:
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Render where
 
-import Control.Monad
-import Control.Monad.Free
+import Control.Arrow ( second )
+import Control.Applicative
+import Control.Monad.Trans.Reader
 
-import Data.Void ( absurd )
-import Data.Functor.Foldable ( para )
+import Data.Monoid
+import Data.Void ( Void, absurd )
+import Data.Functor.Foldable ( cata, embed )
 
 import Data.Interface
 import Data.Interface.Change
 import Data.Interface.Type.Diff
 
-import System.Console.ANSI as ANSI
+import System.IO ( stdout )
+
+import Text.PrettyPrint.ANSI.Leijen hiding ( (<>), (<$>), (<+>), (</>) )
+import qualified Text.PrettyPrint.ANSI.Leijen as L
 
 
-data Render a
-    = Render String [a]
-    | SetSGR [ANSI.SGR] a
-    deriving (Functor, Foldable, Traversable)
+type Indent = Int
+
+data REnv = REnv
+    { reQualContext :: QualContext
+    } deriving (Show)
+
+newtype RDoc = RDoc (Reader REnv Doc)
+
+instance Monoid RDoc where
+    mempty = RDoc $ pure mempty
+    mappend (RDoc a) (RDoc b) = RDoc $ liftA2 mappend a b
+
+unRDoc :: QualContext -> RDoc -> Doc
+unRDoc qc (RDoc m) = runReader m $ REnv qc
+
+withQC :: (QualContext -> Doc) -> RDoc
+withQC f = RDoc $ f <$> asks reQualContext
+
+liftDocOp :: (Doc -> Doc -> Doc) -> RDoc -> RDoc -> RDoc
+liftDocOp f a b = withQC $ \qc -> f (unRDoc qc a) (unRDoc qc b)
+
+(<+>), (</>), (<//>), (<#>) :: RDoc -> RDoc -> RDoc
+(<+>) = liftDocOp (L.<+>)
+(</>) = liftDocOp (L.</>)
+(<//>) = liftDocOp (L.<//>)
+(<#>) = liftDocOp (L.<$>)
+
+infixr 5 </>,<//>,<#>
+infixr 6 <+>
 
 
-data RenderStyle = RenderStyle
-    { baseIndent :: Int
-    , incrIndent :: Int
-    }
-
-defaultRenderStyle :: RenderStyle
-defaultRenderStyle = RenderStyle
-    { baseIndent = 0
-    , incrIndent = 2
-    }
-
--- | The default `RenderStyle`, except with the given base indentation level.
-indent :: Int -> RenderStyle
-indent i = defaultRenderStyle { baseIndent = i }
+renderStdout :: (Render a) => Indent -> QualContext -> a -> IO ()
+renderStdout i qc a =
+    displayIO stdout $ renderPretty 0.8 78 $
+        indent i $ unRDoc qc $ doc a
 
 
-type RenderTree = Free Render ()
+node :: RDoc -> [RDoc] -> RDoc
+node n xs = combine vcat $
+    n : map (style $ indent 2) xs
 
-renderStdout :: RenderStyle -> RenderTree -> IO ()
-renderStdout style renderTree = do
-    let initSGR = [ANSI.Reset]
-    putStr $ ANSI.setSGRCode initSGR
-    go 0 initSGR renderTree
-  where
-    go :: Int -> [ANSI.SGR] -> Free Render () -> IO ()
-    go depth sgr0 m0 = case m0 of
-        Pure () -> pure ()
-        Free r -> case r of
-            Render s ms -> do
-                putStrLn $ indentString depth s
-                forM_ ms $ go (depth+1) sgr0
-            SetSGR sgr m -> do
-                putStr $ setSGRCode sgr
-                go depth sgr m
-                putStr $ setSGRCode sgr0
+node' :: String -> [RDoc] -> RDoc
+node' = node . text'
 
-    indentString :: Int -> String -> String
-    indentString d s = replicate (baseIndent + incrIndent * d) ' ' ++ s
-      where RenderStyle{..} = style
+style :: (Doc -> Doc) -> RDoc -> RDoc
+style f (RDoc m) = RDoc $ fmap f m
 
+combine :: (Functor f) => (f Doc -> Doc) -> f RDoc -> RDoc
+combine f ds = withQC $ \qc -> f $ fmap (unRDoc qc) ds
 
-node :: (MonadFree Render m) => String -> [m ()] -> m ()
-node s = wrap . Render s
+text' :: String -> RDoc
+text' = doc . text
 
-line :: (MonadFree Render m) => String -> m ()
-line s = wrap $ Render s []
+char' :: Char -> RDoc
+char' = doc . char
 
-color :: ANSI.Color -> Free Render a -> Free Render a
-color c = wrap . SetSGR [ANSI.SetColor ANSI.Foreground ANSI.Vivid c]
+qual :: Qual String -> RDoc
+qual q = RDoc $ do
+    qc <- asks reQualContext
+    pure $ text $ resolveQual qc q
 
 
-renderTypeCon :: TypeCon -> Free Render ()
-renderTypeCon (TypeCon name origin kind info) =
-    node (name ++ " :: " ++ showKind kind)
-        [ line infoString
-        , node (formatOrigin origin) []
-        ]
-  where
-    infoString = case info of
+
+class Render a where
+    doc :: a -> RDoc
+    doc = RDoc . pure . doc'
+
+    doc' :: a -> Doc
+    doc' = unRDoc qualifyAll . doc
+
+    namedDoc :: Named a -> RDoc
+    namedDoc (Named n a) =
+        text' n <#> style (indent 2) (doc a)
+
+    {-# MINIMAL doc | doc' #-}
+
+
+namedElemDoc :: (Render c, Render a) => Named (Elem c a) -> RDoc
+namedElemDoc = namedDoc  -- TODO
+
+
+{-
+class RenderItems a where
+    renderItems :: a -> [Doc]
+-}
+
+
+instance Render RDoc where
+    doc = id
+    {-# INLINABLE doc #-}
+
+instance Render Doc where
+    doc' = id
+    {-# INLINABLE doc' #-}
+
+instance Render Void where
+    doc = absurd
+
+instance Render TypeConInfo where
+    doc i = text' $ case i of
         ConAlgebraic -> "[algebraic]"
         ConSynonym   -> "[synonym]"
         ConClass     -> "[class]"
+
+
+instance Render TypeCon where
+    doc (TypeCon name origin kind info) =
+        -- TODO
+        node (text' name <+> prefixSig (doc kind))
+            [ doc info
+            , node (text' $ formatOrigin origin) []
+            ]
 
 
 formatOrigin :: Origin -> String
@@ -104,197 +158,202 @@ formatSomeName q = showQualName q ++ case namespace q of
     Values -> " (value)"
     Types -> " (type)"
 
-formatPred :: QualContext -> Pred -> String
-formatPred = pprintPred
 
-
-renderExport :: QualContext -> Export -> Free Render ()
-renderExport qc e = case e of
-    LocalValue vd -> renderNamedValueDecl qc vd
-    LocalType td  -> renderNamedTypeDecl qc td
-    ReExport q    -> node (formatSomeName q) []
-
-
-renderNamed :: (a -> [Free Render ()]) -> Named a -> Free Render ()
-renderNamed f (Named n a) = node n (f a)
-
-
-renderNamedValueDecl :: QualContext -> Named ValueDecl -> Free Render ()
-renderNamedValueDecl = renderNamed . valueDeclProps
-
-renderNamedTypeDecl :: QualContext -> Named TypeDecl -> Free Render ()
-renderNamedTypeDecl = renderNamed . typeDeclProps
-
-
-renderValueDeclProps :: QualContext -> ValueDecl -> [Free Render ()]
-renderValueDeclProps qc = valueDeclProps qc
-
-renderTypeDeclProps :: QualContext -> TypeDecl -> [Free Render ()]
-renderTypeDeclProps qc = typeDeclProps qc
-
-
-valueDeclProps :: QualContext -> ValueDecl -> [Free Render ()]
-valueDeclProps qc vd =
-    [ renderValueDeclInfo $ vdInfo vd
-    , node "::" [renderType qc $ vdType vd]
-    ]
-
-renderValueDeclInfo :: ValueDeclInfo -> Free Render ()
-renderValueDeclInfo i = case i of
-    Identifier ->
-        line "[identifier]"
-    PatternSyn ->
-        line "[pattern synonym]"
-    DataCon fields ->
-        node "[data constructor]" (map (line . rawName) fields)
-
-
-typeDeclProps :: QualContext -> TypeDecl -> [Free Render ()]
-typeDeclProps qc td =
-    [ renderTypeDeclInfo $ tdInfo td
-    , renderKind qc $ tdKind td
-    ]
-
-renderTypeDeclInfo :: TypeDeclInfo -> Free Render ()
-renderTypeDeclInfo i = case i of
-    DataType Abstract ->
-        line "[abstract data type]"
-    DataType (DataConList dataCons) ->
-        node "[data type]" (map (line . rawName) dataCons)
-    TypeSyn s ->
-        node "[type synonym]" [ line s ]
-    TypeClass ->
-        line "[class]"
-
-renderKind :: QualContext -> Kind -> Free Render ()
-renderKind qc k = line $ ":: " ++ pprintKind qc k
-
-
-renderChangedExportDiff :: QualContext -> ExportDiff -> Maybe (Free Render ())
-renderChangedExportDiff qc ed = case ed of
-    SameReExport{} -> Nothing
-    DiffReExport e -> Just $ renderElem' renderReExport e
-    DiffValue dv
-        | isElemChanged (unName dv) -> Just $ renderElemValueDeclDiff qc dv
-        | otherwise -> Nothing
-    DiffType dt
-        | isElemChanged (unName dt) -> Just $ renderElemTypeDeclDiff qc dt
-        | otherwise -> Nothing
-  where
-    renderReExport q = [line $ resolveQual qc q]
-
-renderElemValueDeclDiff ::
-    QualContext ->
-    Named (Elem ValueDeclDiff ValueDecl) ->
-    Free Render ()
-renderElemValueDeclDiff qc =
-    renderNamed $ \e ->
-        [ renderElem (renderValueDeclDiff qc) (renderValueDeclProps qc) e ]
-
-renderElemTypeDeclDiff ::
-    QualContext ->
-    Named (Elem TypeDeclDiff TypeDecl) ->
-    Free Render ()
-renderElemTypeDeclDiff qc n =
-    node (rawName n)
-        [ renderElem (renderTypeDeclDiff qc) (renderTypeDeclProps qc) e ]
-  where
-    e = unName n
-
-
-renderChange :: (a -> Free Render ()) -> Change a -> Free Render ()
-renderChange r c = case c of
-    Same a -> r a   -- as if no `Change` were present
-    Change a b ->
-        node "[change]"
-            [ color ANSI.Red $ node "-" [r a]
-            , color ANSI.Green $ node "+" [r b]
-            ] 
-
-
-renderValueDeclDiff :: QualContext -> ValueDeclDiff -> Free Render ()
-renderValueDeclDiff qc (ValueDeclDiff t i) =
-    node "[ValueDeclDiff]"
-        [ renderChange renderValueDeclInfo i
-        , renderTypeDiff qc t
-        ]
-
-renderTypeDeclDiff :: QualContext -> TypeDeclDiff -> Free Render ()
-renderTypeDeclDiff qc (TypeDeclDiff k i) =
-    node "[TypeDeclDiff]"
-        [ renderChange renderTypeDeclInfo i
-        , renderChange (renderKind qc) k
-        ]
-
-
-renderElem ::
-    (c -> Free Render ()) ->
-    (a -> [Free Render ()]) ->
-    Elem c a -> Free Render ()
-renderElem rc ra e = case e of
-    Added a   -> color ANSI.Green $ node "[added]" (ra a)
-    Removed a -> color ANSI.Red $ node "[removed]" (ra a)
-    Changed c -> rc c
-
-renderElem' :: (a -> [Free Render ()]) -> Elem' a -> Free Render ()
-renderElem' = renderElem absurd
-
-
-renderType :: QualContext -> Type -> Free Render ()
-renderType qc = para (paraRenderTypeF qc)
-
-
-renderTypeDiff :: QualContext -> TypeDiff -> Free Render ()
-renderTypeDiff qc td = case iterTypeDiff td of
-    Left (Replace a b) ->
-        node "[change]"
-            [ color ANSI.Red $ node "-" [renderType qc a]
-            , color ANSI.Green $ node "+" [renderType qc b]
-            ]
-    Right f -> renderTypeF qc $ fmap (renderTypeDiff qc) f
+formatPred :: Pred -> RDoc
+formatPred p = case p of
+    ClassPred q ts -> combine hsep $ qual q : map doc ts
+    EqPred{} -> text' (show p)  -- TODO
 
 
 
--- | An algebra for reducing an open type term to a Free Render ()
-renderTypeF :: QualContext -> TypeF (Free Render ()) -> Free Render ()
-renderTypeF qc t0 = case t0 of
-    VarF (TypeVar s _) -> line s
-    ConF qual -> line $ resolveQual qc qual
-    ApplyF c a -> 
-        node "Apply" [c, a]
-    --  ApplyF{} -> 
-    --      let tcon : params = flattenApply t0
-    --      in node (pprintType qc tcon) params
+renderExport :: Export -> RDoc
+renderExport e = case e of
+    LocalValue vd -> namedDoc vd
+    LocalType td  -> namedDoc td
+    ReExport q    -> text' $ formatSomeName q
+
+
+renderIfChanged :: (Diff a c, Render c) => c -> RDoc
+renderIfChanged d
+    | isChanged d = doc d
+    | otherwise = mempty
+
+
+-- Declarations
+
+instance Render ValueDecl where
+    doc (ValueDecl t i) =
+        doc i <#> prefixSig (doc t) <> doc line
+
+instance Render ValueDeclDiff where
+    doc (ValueDeclDiff t i) =
+        doc i <#> prefixSig (doc t) <> doc line
+
+
+instance Render ValueDeclInfo where
+    doc i = case i of
+        Identifier ->
+            text' "[id]"
+        PatternSyn ->
+            text' "[pattern]"
+        DataCon fields ->
+            node' "[data con]" (map (text' . rawName) fields)
+
+
+instance Render TypeDecl where
+    doc (TypeDecl k i) =
+        doc i <#> prefixSig (doc k) <> doc line
+
+instance Render TypeDeclDiff where
+    doc (TypeDeclDiff k i) =
+        doc i <#> prefixSig (doc k) <> doc line
+
+instance Render TypeDeclInfo where
+    doc i = case i of
+        DataType Abstract ->
+            text' "[abstract data type]"
+        DataType (DataConList dataCons) ->
+            node' "[data type]" (map (text' . rawName) dataCons)
+        TypeSyn s ->
+            node' "[synonym]" [ text' s ]
+        TypeClass ->
+            text' "[class]"
+
+
+
+
+instance Render Kind where
+    doc k = case k of
+        KindVar s -> text' s
+        StarKind -> char' '*'
+        HashKind -> char' '#'
+        SuperKind -> text' "BOX"
+        ConstraintKind -> text' "Constraint"
+        PromotedType q -> qual q
+        FunKind a b -> doc a <+> text' "->" </> doc b
+
+
+
+instance Render ExportDiff where
+    doc ed = case ed of
+        DiffReExport e -> doc $ fmap renderReExport e
+        DiffValue dv -> namedDoc dv
+        DiffType dt -> namedDoc dt
+        SameReExport e -> renderReExport e
+      where
+        renderReExport q =
+            qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
+        
+
+renderChangedExportDiff :: ExportDiff -> RDoc
+renderChangedExportDiff ed =
+    case ed of
+        DiffReExport e -> doc $ fmap renderReExport e
+        DiffValue dv
+            | isElemChanged (unName dv) -> namedElemDoc dv
+        DiffType dt
+            | isElemChanged (unName dt) -> namedElemDoc dt
+        _ -> mempty
+      where
+        renderReExport q =
+            qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
+-- TODO: make ExportDiff an instance of Diff:
+--renderChangedExportDiff = renderIfChanged
+
+
+prefixSig :: RDoc -> RDoc
+prefixSig d = text' "::" <+> style align d
+
+
+instance (Render c, Render a) => Render (Elem c a) where
+    doc e = case e of
+        Added a   -> style green $ doc a
+        Removed b -> style red $ doc b
+        Changed c -> doc c
+
+    namedDoc (Named n e) = case e of
+        Added a   -> style green $ namedDoc (Named n a)
+        Removed b -> style red $ namedDoc (Named n b)
+        Changed c -> namedDoc (Named n c)
+
+
+instance (Render a) => Render (Change a) where
+    doc c = case c of
+        Same a -> doc a   -- as if no `Change` were present
+        Change a b ->
+            combine vcat
+                [ style red $ text' "-" <+> style align (doc a)
+                , style green $ text' "+" <+> style align (doc b)
+                ]
+
+instance (Render a) => Render (Replace a) where
+    doc = doc . toChange
+     
+
+
+instance Render Type where
+    doc = snd . renderTypePrec
+
+instance Render TypeDiff where
+    doc = snd . renderTypeDiffPrec
+
+
+data Prec = TopPrec | FunPrec | AppPrec | ConPrec
+    deriving (Show, Eq, Ord)
+
+renderTypePrec :: Type -> (Prec, RDoc)
+renderTypePrec = cata renderTypeAlg
+
+renderTypeAlg :: (Render a) => TypeF (Prec, a) -> (Prec, RDoc)
+renderTypeAlg t0 = case t0 of
+    VarF (TypeVar s _) -> (ConPrec, text' s)
+    ConF q -> (ConPrec, qual q)
+    ApplyF c a ->
+        (,) AppPrec $ docPrec TopPrec c <+> docPrec AppPrec a
     FunF a b ->
-        node "(->)" [a, b]
-    ForallF vs t ->
-        node "Forall "
-            [ node "[vars]" $ map (line . pprintVar qc) vs
-            , t
-            ]
-    ContextF ps t ->
-        node "Context"
-            [ node "[preds]" $ map (line . formatPred qc) ps
-            , t
-            ]
+        (,) FunPrec $
+        docPrec FunPrec a <+> text' "->" </> docPrec TopPrec b
+    ForallF vs (_, t) ->
+        (,) TopPrec $
+        if showForall
+            then doc (renderForall vs) <#> doc t
+            else doc t
+    ContextF ps (_, t) ->
+        (,) TopPrec $
+            combine tupled (map formatPred ps) <+> text' "=>" </> doc t
+  where
+    showForall = False
 
--- | A paramorphic version of `renderTypeF` that uses information about
--- subterms to pretty-print type constructors.
-paraRenderTypeF ::
-    QualContext ->
-    TypeF (Type, Free Render ()) ->
-    Free Render ()
-paraRenderTypeF qc t0 = case t0 of
-    ApplyF (c,_) (_, a) -> 
-        node (pprintType qc c) [a]
-    _ -> renderTypeF qc $ fmap snd t0
+    docPrec :: (Render a) => Prec -> (Prec, a) -> RDoc
+    docPrec prec0 (prec, d)
+         | prec <= prec0 = style parens (doc d)
+         | otherwise = doc d
+
+
+renderForall :: [TypeVar] -> Doc
+renderForall vs = hsep (map text $ "forall" : varNames) <> dot
+  where
+    varNames = map varName vs
+
+
+renderTypeDiffPrec :: TypeDiff -> (Prec, RDoc)
+renderTypeDiffPrec = cata renderTypeDiffAlg
+    
+renderTypeDiffAlg :: (Render a) => DiffTypeF Type (Prec, a) -> (Prec, RDoc)
+renderTypeDiffAlg td0 = case td0 of
+    DiffTypeF r -> (,) ConPrec $ replaceDoc (fmap embed r)
+    SameTypeF fc -> renderTypeAlg $ fmap (second doc) fc
+  where
+    replaceDoc :: Replace Type -> RDoc
+    replaceDoc (Replace t0 t1) =
+        style braces $
+            style red (doc t0) <+> text' "/" <+> style green (doc t1)
 
 
 {-
-flattenApply :: Type -> [Type]
-flattenApply t0 = case t0 of
-    Apply a r -> case a of
-        Apply as t -> flattenApply as ++ [t,r]
-        _ -> [a,r]
-    _ -> [t0]
+-- TODO
+renderApplySugar :: (Render a) => TypeCon -> TypeF a -> Maybe (Prec, RDoc)
+renderApplySugar con t0 = case rawName con of
+    "[]" -> Just (ConPrec, style brackets $ _ t0)
+    _ -> Nothing
 -}

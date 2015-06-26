@@ -95,6 +95,9 @@ toReplace c = case toChange c of
     Same a -> Replace a a
     Change a b -> Replace a b
 
+isSame :: (Diff a c) => c -> Bool
+isSame = not . isChanged
+
 
 instance (Eq a) => Diff a (Change a) where
     diff a b

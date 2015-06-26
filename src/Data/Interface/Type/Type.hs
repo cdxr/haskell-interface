@@ -140,7 +140,7 @@ data Kind
     | HashKind                     -- ^ Unlifted types (#)
     | SuperKind                    -- ^ the type of kinds (BOX)
     | ConstraintKind               -- ^ Constraints
-    | PromotedType (Qual TypeName) -- ^ promoted type using DataKinds
+    | PromotedType (Qual RawName)  -- ^ promoted type using DataKinds
     | FunKind Kind Kind
     deriving (Show, Eq, Ord)
 

@@ -4,12 +4,9 @@ module Main where
 
 import Control.Monad
 import Control.Monad.Trans.Reader
+import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
-
-import Data.Maybe ( mapMaybe )
-
-import qualified System.Console.ANSI as ANSI
 
 import LoadModuleInterface   ( readModuleInterfaces )
 
@@ -50,6 +47,9 @@ loadModule t = do
     is <- liftIO $ readModuleInterfaces [t]
     case is of
         [iface] -> do
+            -- don't qualify names from this module
+            unqualify $ moduleName iface  
+
             ms <- getArg hideString
             pure $ case ms of
                 Nothing -> iface
@@ -58,18 +58,17 @@ loadModule t = do
 
 
 printModuleInterface :: ModuleInterface -> Main ()
-printModuleInterface iface = liftIO $ do
-    putStrLn $ "\n*** Module: " ++ moduleName iface ++ " ***\n"
+printModuleInterface iface = do
+    outputLine $ unlines
+        [ "\n*** Module: " ++ moduleName iface ++ " ***\n"
+        , "Exposed type constructors:\n"
+        ]
 
-    let render a = renderStdout (indent 2) a >> putStrLn ""
+    forM_ (moduleTypeCons iface) $ renderDoc . doc
 
-    putStrLn "Exposed type constructors:\n"
-    forM_ (moduleTypeCons iface) $ render . renderTypeCon
+    outputLine "Module exports:\n"
 
-    let qc = defQualContext  -- TODO: set `QualContext`
-
-    putStrLn "Module exports:\n"
-    forM_ (compileModuleExports iface) $ render . renderExport qc
+    forM_ (compileModuleExports iface) $ renderDoc . renderExport
 
 
 printModuleDiff :: (Target, Target) -> ModuleDiff -> Main ()
@@ -83,10 +82,7 @@ printModuleDiff (t0, t1) mdiff = do
         , "************************************"
         ]
 
-    let qc = defQualContext  -- TODO store a `QualifyContext` in the `Result`
-
-    mapM_ renderTree . mapMaybe (renderChangedExportDiff qc) $
-        diffModuleExports mdiff
+    forM_ (diffModuleExports mdiff) $ renderDoc . renderChangedExportDiff
 
 
 -- | This function is horribly inefficient, but is only used for processing
@@ -129,16 +125,22 @@ runTestModule t = do
                 | otherwise -> s
 
 
-newtype Main a = Main (ReaderT ProgramArgs IO a)
+
+newtype Main a = Main (ReaderT ProgramArgs (StateT QualContext IO) a)
     deriving (Functor, Applicative, Monad, MonadIO)
 
 runMain :: Main a -> ProgramArgs -> IO a
-runMain (Main m) args = do
-    a <- runReaderT m args
-    a <$ ANSI.setSGR [ANSI.Reset]
+runMain (Main m) args =
+    evalStateT (runReaderT m args) defQualContext
 
 getArg :: (ProgramArgs -> a) -> Main a
 getArg = Main . asks
+
+getQualContext :: Main QualContext
+getQualContext = Main (lift get)
+
+unqualify :: ModuleName -> Main ()
+unqualify = Main . lift . modify . unqualifyModule
 
 whenFlag :: (ProgramArgs -> Flag) -> Main a -> Main (Maybe a)
 whenFlag f m = do
@@ -152,10 +154,11 @@ whenFlag_ f m = do
 
 
 outputLine :: String -> Main ()
-outputLine = Main . lift . putStrLn
+outputLine = liftIO . putStrLn
 
 
-renderTree :: RenderTree -> Main ()
-renderTree rt = Main . lift $
-    renderStdout (indent 2) rt >> putStrLn ""
-
+renderDoc :: (Render a) => a -> Main ()
+renderDoc a = do
+    qc <- getQualContext
+    liftIO $ renderStdout 2 qc a
+    outputLine ""
