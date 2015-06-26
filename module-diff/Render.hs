@@ -67,6 +67,7 @@ renderStdout i qc a =
         indent i $ unRDoc qc $ doc a
 
 
+-- (Deprecated)
 node :: RDoc -> [RDoc] -> RDoc
 node n xs = combine vcat $
     n : map (style $ indent 2) xs
@@ -149,11 +150,6 @@ formatOrigin o = case o of
   where
     showLoc (SrcLoc l c) = show l ++ ":" ++ show c
 
-formatSomeName :: Qual SomeName -> String
-formatSomeName q = showQualName q ++ case namespace q of
-    Values -> " (value)"
-    Types -> " (type)"
-
 
 formatPred :: Pred -> RDoc
 formatPred p = case p of
@@ -162,11 +158,11 @@ formatPred p = case p of
 
 
 
-renderExport :: Export -> RDoc
-renderExport e = case e of
-    LocalValue vd -> namedDoc vd
-    LocalType td  -> namedDoc td
-    ReExport q    -> text' $ formatSomeName q
+instance Render Export where
+    doc e = case e of
+        LocalValue vd -> namedDoc vd
+        LocalType td  -> namedDoc td
+        ReExport q    -> renderReExport q
 
 
 renderIfChanged :: (Diff a c, Render c) => c -> RDoc
@@ -236,9 +232,10 @@ instance Render ExportDiff where
         DiffValue dv -> namedDoc dv
         DiffType dt -> namedDoc dt
         SameReExport e -> renderReExport e
-      where
-        renderReExport q =
-            qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
+
+renderReExport :: Qual SomeName -> RDoc
+renderReExport q =
+    qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
         
 
 -- TODO: make ExportDiff an instance of Diff:

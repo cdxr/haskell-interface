@@ -14,7 +14,7 @@ import Data.Interface
 
 import ProgramArgs
 import Builtin ( builtinTasks )
-import Render
+import Render ( Render(..), renderStdout )
 
 
 main :: IO ()
@@ -64,11 +64,11 @@ printModuleInterface iface = do
         , "Exposed type constructors:\n"
         ]
 
-    forM_ (moduleTypeCons iface) $ renderDoc . doc
+    mapM_ render (moduleTypeCons iface)
 
     outputLine "Module exports:\n"
 
-    forM_ (compileModuleExports iface) $ renderDoc . renderExport
+    mapM_ render (compileModuleExports iface)
 
 
 printModuleDiff :: (Target, Target) -> ModuleDiff -> Main ()
@@ -82,7 +82,7 @@ printModuleDiff (t0, t1) mdiff = do
         , "************************************"
         ]
 
-    forM_ (diffModuleExports mdiff) $ renderDoc . doc
+    mapM_ render (diffModuleExports mdiff)
 
 
 -- | This function is horribly inefficient, but is only used for processing
@@ -157,8 +157,8 @@ outputLine :: String -> Main ()
 outputLine = liftIO . putStrLn
 
 
-renderDoc :: (Render a) => a -> Main ()
-renderDoc a = do
+render :: (Render a) => a -> Main ()
+render a = do
     qc <- getQualContext
     liftIO $ renderStdout 2 qc a
     outputLine ""
