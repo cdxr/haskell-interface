@@ -107,10 +107,6 @@ class Render a where
     {-# MINIMAL doc | doc' #-}
 
 
-namedElemDoc :: (Render c, Render a) => Named (Elem c a) -> RDoc
-namedElemDoc = namedDoc  -- TODO
-
-
 {-
 class RenderItems a where
     renderItems :: a -> [Doc]
@@ -245,18 +241,6 @@ instance Render ExportDiff where
             qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
         
 
-renderChangedExportDiff :: ExportDiff -> RDoc
-renderChangedExportDiff ed =
-    case ed of
-        DiffReExport e -> doc $ fmap renderReExport e
-        DiffValue dv
-            | isElemChanged (unName dv) -> namedElemDoc dv
-        DiffType dt
-            | isElemChanged (unName dt) -> namedElemDoc dt
-        _ -> mempty
-      where
-        renderReExport q =
-            qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
 -- TODO: make ExportDiff an instance of Diff:
 --renderChangedExportDiff = renderIfChanged
 

@@ -82,7 +82,7 @@ printModuleDiff (t0, t1) mdiff = do
         , "************************************"
         ]
 
-    forM_ (diffModuleExports mdiff) $ renderDoc . renderChangedExportDiff
+    forM_ (diffModuleExports mdiff) $ renderDoc . doc
 
 
 -- | This function is horribly inefficient, but is only used for processing
