@@ -16,10 +16,11 @@ import Options.Applicative
 parseProgramArgs :: IO ProgramArgs
 parseProgramArgs =
     execParser $
-        -- info (helper <*> mainParser)
-         info (helper <*> mainParser <|> pure defaultProgramArgs)
-             (fullDesc <>
-                header "module-diff: view and compare module interfaces")
+         info (helper <*> mainParser <|> pure defaultProgramArgs) $
+            mconcat
+                [ fullDesc
+                , header "module-diff: view and compare module interfaces"
+                ]
 
 type Flag = Bool
 
@@ -72,11 +73,19 @@ flag_instances = switch $ mconcat
     ]
 
 parseTask :: Parser Task
-parseTask = asum
-    [ parseBuiltinTask
-    , parseRunTestModule
-    , parseCompareInterfaces
-    , parsePrintInterface
+parseTask = subparser $ mconcat
+    [ command "show" $
+        info (helper <*> parsePrintInterface) $
+            progDesc "Print an interface summary"
+    , command "compare" $
+        info (helper <*> parseCompareInterfaces) $
+            progDesc "Compare two module interfaces"
+    , command "test" $
+        info (helper <*> parseRunTestModule) $
+            progDesc "Run a \"test\" module"
+    , command "builtin" $
+        info (helper <*> parseBuiltinTask) $
+            progDesc "Run a built-in task (development feature)"
     ]
 
 parsePrintInterface :: Parser Task
@@ -84,8 +93,8 @@ parsePrintInterface = PrintInterface <$> argument str (metavar "TARGET")
 
 parseCompareInterfaces :: Parser Task
 parseCompareInterfaces = CompareInterfaces
-    <$> argument str (metavar "OLD")
-    <*> argument str (metavar "NEW")
+    <$> argument str (metavar "OLD-TARGET")
+    <*> argument str (metavar "NEW-TARGET")
 
 parseRunTestModule :: Parser Task
 parseRunTestModule = RunTestModule <$> option str fields
@@ -99,5 +108,4 @@ parseBuiltinTask = BuiltInTask <$> option str fields
   where
     fields = long "built-in"
           <> short 'b'
-          <> metavar "ID"
-          <> help "Run a built-in target (development feature)"
+          <> metavar "TASK-ID"
