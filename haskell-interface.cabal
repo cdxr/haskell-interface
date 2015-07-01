@@ -17,7 +17,10 @@ library
     LoadModuleInterface
     Data.Interface
     Data.Interface.Name
+    Data.Interface.Name.Map
     Data.Interface.Source
+    Data.Interface.Change
+    Data.Interface.Change.OrdSet
     Data.Interface.Type
     Data.Interface.Type.Type
     Data.Interface.Type.Diff
@@ -26,7 +29,6 @@ library
     Data.Interface.Module
     Data.Interface.Module.Decl
     Data.Interface.ModuleDiff
-    Data.Interface.Change
   -- other-modules:
   -- other-extensions:
   build-depends:

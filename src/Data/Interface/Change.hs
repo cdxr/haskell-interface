@@ -6,17 +6,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Data.Interface.Change where
 
 import Data.Bifunctor
-import Data.Function ( on )
-import Data.Monoid
 
-import Data.Void ( Void, absurd )
-
-import Data.Set ( Set )
-import qualified Data.Set as Set
+import Data.Functor.Classes
 
 import Data.Map ( Map )
 import qualified Data.Map as Map
@@ -26,15 +22,47 @@ import qualified Data.Map as Map
 -- "new" value of @a@. There is a distinguished constructor for when these
 -- values are considered equal, which depends on the context in which the
 -- `Change` is used.
-data Change a = Same a | Change a a
+data Change a = NoChange a | Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-instance Applicative Change where
-    pure = Same
 
-    Same f <*> c = f <$> c
-    Change f0 f1 <*> Same a = Change (f0 a) (f1 a)
-    Change f0 f1 <*> Change a0 a1 = Change (f0 a0) (f1 a1)
+change :: (a -> b) -> (a -> a -> b) -> Change a -> b
+change n _ (NoChange a) = n a
+change _ c (Change a b) = c a b
+
+
+-- | @old c@ is the older value stored in @c@.
+--
+-- @
+-- old (diff a b) = a
+-- @
+old :: Change a -> a
+old = change id $ \a _ -> a
+
+-- | @new c@ is the newer value stored in @c@.
+--
+-- @
+-- new (diff a b) = b
+-- @
+new :: Change a -> a
+new = change id $ \_ b -> b
+
+
+instance Applicative Change where
+    pure = NoChange
+
+    NoChange f <*> c = f <$> c
+    Change f0 f1 <*> c = Change (f0 $ old c) (f1 $ new c)
+
+instance Monad Change where
+    return = NoChange
+
+    NoChange x >>= f = f x
+    Change x y >>= f = Change (old $ f x) (new $ f y)
+
+instance (Monoid a) => Monoid (Change a) where
+    mempty = NoChange mempty
+    mappend a b = mappend <$> a <*> b
 
 
 -- | @Replace a@ is like @Change a@, except that the values are always
@@ -43,66 +71,83 @@ instance Applicative Change where
 data Replace a = Replace a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
+instance Applicative Replace where
+    pure a = Replace a a
+    Replace f g <*> Replace x y = Replace (f x) (g y)
+
+instance Monad Replace where
+    return a = Replace a a
+    Replace x0 y0 >>= f = Replace x y
+      where
+        Replace x _ = f x0
+        Replace _ y = f y0
+
+
+-- | @Same a@ is a constant @a@. It is used in contexts expecting a @Change a@
+-- when the value is statically guaranteed to be unchanged.
+newtype Same a = Same a
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+getSame :: Same a -> a
+getSame (Same a) = a
+{-# INLINABLE getSame #-}
+
 
 -- | Class for any type @c@ that represents a pair of values of type @a@,
 -- where one value is considered an updated or more recent version of the
 -- other.
 --
 -- @
+-- noDiff a = diff a a
+-- @
+--
+-- @
+-- toChange (noDiff a) = NoChange a
+-- @
+--
+-- @
 -- toChange (diff a b) = Change c d  ==>  (a,b) = (c,d)
 -- @
 --
+-- @isChanged = isChanged . toChange@
+--
 class Diff a c | c -> a where
-    diff :: a -> a -> c
     toChange :: c -> Change a
+    diff :: a -> a -> c
+
+    noDiff :: a -> c
+    noDiff a = diff a a
+    {-# INLINABLE noDiff #-}
 
     isChanged :: c -> Bool
     isChanged c = case toChange c of
-        Same{}   -> False
-        Change{} -> True
+        NoChange{} -> False
+        Change{}   -> True
 
     {-# MINIMAL diff, toChange #-}
 
 
--- | @old c@ is the older value of @a@ stored in the @c@.
---
--- @
--- old (diff a b) = a
--- @
-old :: (Diff a c) => c -> a
-old c = case toChange c of
-    Change a _ -> a
-    Same a     -> a
+fromChange :: (Diff a c) => Change a -> c
+fromChange = change noDiff diff
+{-# INLINABLE fromChange #-}
 
--- | @new c@ is the newer value of @a@ stored in the @c@.
---
--- @
--- new (diff a b) = b
--- @
-new :: (Diff a c) => c -> a
-new c = case toChange c of
-    Change _ b -> b
-    Same b     -> b
-
--- | @same c@ is @Just a@ when @a = old c = new c@.
-same :: (Diff a c) => c -> Maybe a
-same c = case toChange c of
-    Same a -> Just a
-    Change{} -> Nothing
-
+-- | @toReplace c@ is the @Replace@ containing the pair of values in @c@, which
+-- has forgotten whether the values are the same.
 toReplace :: (Diff a c) => c -> Replace a
-toReplace c = case toChange c of
-    Same a -> Replace a a
-    Change a b -> Replace a b
+toReplace = change pure Replace . toChange
+{-# INLINABLE toReplace #-}
 
 isSame :: (Diff a c) => c -> Bool
 isSame = not . isChanged
+{-# INLINABLE isSame #-}
 
 
 instance (Eq a) => Diff a (Change a) where
     diff a b
         | a /= b    = Change a b
-        | otherwise = Same b
+        | otherwise = NoChange b
+
+    noDiff = NoChange
 
     toChange = id
     {-# INLINABLE toChange #-}
@@ -111,6 +156,8 @@ instance (Eq a) => Diff a (Change a) where
 -- | trivial: considers all values to be distinct
 instance Diff a (Replace a) where
     diff = Replace
+    noDiff a = Replace a a
+
     toChange (Replace a b) = Change a b
 
 
@@ -119,25 +166,52 @@ instance Diff a (Replace a) where
 data Elem c a
     = Removed a   -- ^ the old value
     | Added a     -- ^ the new value
-    | Changed c   -- ^ the old and new value
+    | Elem c      -- ^ the old and new values
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+
+-- | Analagous to @fromMaybe@. @fromElem x@ is a function that converts an
+-- @Elem c a@ to a @c@ by filling in @x@ for any missing value of type @a@.
+fromElem :: (Diff a c) => a -> Elem c a -> c
+fromElem x e = case e of
+    Removed a -> diff a x
+    Added b   -> diff x b
+    Elem c    -> c
 
 isElemChanged :: (Diff a c) => Elem c a -> Bool
 isElemChanged e = case e of
     Removed{} -> True
     Added{}   -> True
-    Changed c -> isChanged c
+    Elem c    -> isChanged c
 
 
--- | An `Elem` that can never represent a change, only an addition or removal.
-type Elem' = Elem Void
+toElemChange :: (Diff a c) => Elem c a -> Elem (Change a) a
+toElemChange = first toChange
 
--- | Recover the @a@ when you don't care whether it was added or removed.
-extractElem :: Elem' a -> a
-extractElem e = case e of
-    Removed a -> a
-    Added a   -> a
-    Changed c -> absurd c
+
+applyChange :: Change (a -> b) -> Elem (Change a) a -> Elem (Change b) b
+applyChange c e = case e of
+    Removed a -> Removed $ old c a
+    Added b   -> Added $ new c b
+    Elem cx   -> Elem $ c <*> cx
+
+
+-- | @SetElem a@ represents an element of type @a@ that may have been added
+-- or removed, but could not have changed.
+type SetElem a = Elem (Same a) a
+
+extractSetElem :: SetElem a -> a
+extractSetElem e = case e of
+    Removed a     -> a
+    Added b       -> b
+    Elem (Same a) -> a
+
+mapSetElem :: (a -> b) -> SetElem a -> SetElem b
+mapSetElem f = bimap (fmap f) f
+
+setElemChange :: SetElem a -> Elem (Change a) a
+setElemChange = first (NoChange . getSame)
+
 
 
 -- | An @Elem (Change a) a@.
@@ -149,20 +223,28 @@ instance Bifunctor Elem where
     bimap f g e = case e of
         Removed a -> Removed (g a)
         Added a   -> Added (g a)
-        Changed c -> Changed (f c)
+        Elem c    -> Elem (f c)
 
 
 diffMaybe :: (Diff a c) => Maybe a -> Maybe a -> Maybe (Elem c a)
 diffMaybe Nothing Nothing = Nothing
 diffMaybe (Just a) Nothing = Just $ Removed a
 diffMaybe Nothing (Just b) = Just $ Added b
-diffMaybe (Just a) (Just b) = Just $ Changed (diff a b)
+diffMaybe (Just a) (Just b) = Just $ Elem (diff a b)
 
 
 -- * Computing Diffs for structures
 
 -- ** Set
 
+{- TODO:
+newtype SetDiff a = SetDiff { Map a (SetElem ()) }
+
+instance Diff (Set a) (SetDiff a) where
+-}
+
+
+{-
 type DiffSet c a = [Elem c a]
 type DiffSetEq a = [ElemEq a]
 
@@ -173,44 +255,90 @@ diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
     go [] ys = map Added ys
     go xs [] = map Removed xs
     go (x:xs) (y:ys) = case compare x y of
-        EQ -> Changed (Same y) : go xs ys
+        EQ -> Changed (NoChange y) : go xs ys
         LT -> Removed x : go xs (y:ys)
         GT -> Added y : go (x:xs) ys
-
-diffSetSummary :: (Diff a c) => DiffSet c a -> DiffSummary c a
-diffSetSummary = transDiffSummary reverse . foldr (addDiffElem (:)) mempty
+-}
 
 
 -- ** Map
 
-type DiffMap k c a = Map k (Elem c a)
-type DiffMapEq k a = Map k (ElemEq a)
+-- | When @f a@ is a container of @a@s and @c@ is a change to an @a@,
+-- @ElemChanges f c a@ is a change to container of @a@s in which 
 
-diffMap :: (Ord k, Diff a c) => Map k a -> Map k a -> DiffMap k c a
-diffMap = diffMapWith (const diff)
+-- | When @c@ represents a change to an @a@ and @f a@ is an associative
+-- container of @a@s, @ElemChanges f c a@ represents a change to such a
+-- container in which elements may have been added, removed, or changed.
+data ElemChanges f c a
+    = NoElemChanges (f a)           -- cached unchanged structure
+    | ElemChanges (f (Elem c a))
 
-diffMapWith :: (Ord k) =>
-    (k -> a -> a -> c) ->
-    Map k a -> Map k a -> DiffMap k c a
-diffMapWith mkDiff = Map.mergeWithKey combine only1 only2
+instance (Show1 f, Show c, Show a) => Show (ElemChanges f c a) where
+    showsPrec p ec = showParen (p > 10) $ case ec of
+        NoElemChanges fa ->
+            showString "NoElemChanges " . showsPrec1 11 fa
+        ElemChanges fe ->
+            showString "ElemChanges " . showsPrec1 11 fe
+
+
+transElemChanges ::
+    (forall x. f x -> g x) -> ElemChanges f c a -> ElemChanges g c a
+transElemChanges nat ec = case ec of
+    NoElemChanges fa -> NoElemChanges (nat fa)
+    ElemChanges fe   -> ElemChanges (nat fe)
+
+type MapDiff k = ElemChanges (Map k)
+type MapDiffEq k a = MapDiff k (Change a) a
+
+instance (Ord k, Diff a c) => Diff (Map k a) (MapDiff k c a) where
+    diff = diffMap
+    noDiff = NoElemChanges
+
+    toChange d = case d of
+        NoElemChanges m -> NoChange m
+        ElemChanges m -> Map.foldMapWithKey f m
+          where
+            f k e = case e of
+                Removed a -> Change (Map.singleton k a) mempty
+                Added b   -> Change mempty (Map.singleton k b)
+                Elem c    -> fmap (Map.singleton k) (toChange c)
+
+
+viewMapDiff :: (Diff a c) => MapDiff k c a -> Map k (Elem c a)
+viewMapDiff d = case d of
+    NoElemChanges m -> Map.map (Elem . noDiff) m
+    ElemChanges m -> m
+
+diffMap :: (Ord k, Diff a c) => Map k a -> Map k a -> MapDiff k c a
+diffMap a b = toMapDiff $ Map.mergeWithKey combine only1 only2 a b
   where
-    combine k x y = Just $ Changed (mkDiff k x y)
+    combine _ x y = Just $ Elem (diff x y)
     only1 = Map.map Removed
     only2 = Map.map Added
+    toMapDiff m
+        | any isElemChanged m = ElemChanges m
+        | otherwise = NoElemChanges b
 
+
+
+{-
+diffSetSummary :: (Diff a c) => DiffSet c a -> DiffSummary c a
+diffSetSummary = transDiffSummary reverse . foldr (addDiffElem (:)) mempty
 
 diffMapSummary' ::
     (Diff a c, Ord k) =>
-    DiffMap k c a -> DiffSummary' (Map k) c a
-diffMapSummary' = foldr f mempty . Map.toList
+    MapDiff k c a -> DiffSummary' (Map k) c a
+diffMapSummary' m = case m of
+    NoElemChanges m -> mempty { unchanged = m }
+    ElemChanges m -> Map.foldrWithKey f mempty m
   where
     f :: (Diff a c, Ord k) =>
-         (k, Elem c a) ->
-         DiffSummary' (Map k) c a ->
-         DiffSummary' (Map k) c a
-    f (k, d) = addDiffElem (Map.insert k) d
+         k ->
+         Elem c a ->
+         DiffSummary' (Map k) c a -> DiffSummary' (Map k) c a
+    f k d = addDiffElem (Map.insert k) d
 
-diffMapSummary :: (Diff a c, Ord k) => DiffMap k c a -> DiffSummary c a
+diffMapSummary :: (Diff a c, Ord k) => MapDiff k c a -> DiffSummary c a
 diffMapSummary = transDiffSummary Map.elems . diffMapSummary'
 
 
@@ -256,3 +384,4 @@ addDiffElem add e ds = case e of
     Removed a -> ds { removed   = add a (removed ds) }
     Added a   -> ds { added     = add a (added ds)}
     Changed c -> addDiff add c ds
+-}

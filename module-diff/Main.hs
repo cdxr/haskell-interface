@@ -8,9 +8,10 @@ import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
-import LoadModuleInterface   ( readModuleInterfaces )
+import LoadModuleInterface   ( readInterface )
 
 import Data.Interface
+import Data.Interface.Change
 
 import ProgramArgs
 import Builtin ( builtinTasks )
@@ -34,7 +35,7 @@ runTask task = case task of
     PrintInterface t ->
         printModuleInterface =<< loadModule t
     CompareInterfaces t0 t1 -> do
-        mdiff <- diffModules <$> loadModule t0 <*> loadModule t1
+        mdiff <- diff <$> loadModule t0 <*> loadModule t1
         printModuleDiff (t0, t1) mdiff
     BuiltInTask s -> case lookup s builtinTasks of
         Nothing -> error $ "not a built-in task: " ++ s
@@ -44,17 +45,15 @@ runTask task = case task of
 
 loadModule :: Target -> Main ModuleInterface
 loadModule t = do
-    is <- liftIO $ readModuleInterfaces [t]
-    case is of
-        [iface] -> do
-            -- don't qualify names from this module
-            unqualify $ moduleName iface  
+    iface <- liftIO $ readInterface t
 
-            ms <- getArg hideString
-            pure $ case ms of
-                Nothing -> iface
-                Just n -> filterInterfaceNames (/= n) iface
-        _ -> error "loadModule: failed to load single interface"  -- TODO
+    -- don't qualify names from this module
+    unqualify $ moduleName iface  
+
+    ms <- getArg hideString
+    pure $ case ms of
+        Nothing -> iface
+        Just n -> filterInterfaceNames (/= n) iface
 
 
 printModuleInterface :: ModuleInterface -> Main ()
@@ -100,7 +99,7 @@ runTestModule t = do
     printModuleInterface iface1
 
     printModuleDiff (t ++ "_0", t ++ "_1") $
-        diffModules iface0 iface1
+        diff iface0 iface1
 
   where
     refineInterface ::

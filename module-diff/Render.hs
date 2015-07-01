@@ -108,12 +108,6 @@ class Render a where
     {-# MINIMAL doc | doc' #-}
 
 
-{-
-class RenderItems a where
-    renderItems :: a -> [Doc]
--}
-
-
 instance Render RDoc where
     doc = id
     {-# INLINABLE doc #-}
@@ -228,10 +222,9 @@ instance Render Kind where
 
 instance Render ExportDiff where
     doc ed = case ed of
-        DiffReExport e -> doc $ fmap renderReExport e
-        DiffValue dv -> namedDoc dv
-        DiffType dt -> namedDoc dt
-        SameReExport e -> renderReExport e
+        LocalValueDiff dv -> namedDoc dv
+        LocalTypeDiff dt -> namedDoc dt
+        ExportDiff c -> doc c
 
 renderReExport :: Qual SomeName -> RDoc
 renderReExport q =
@@ -250,17 +243,17 @@ instance (Render c, Render a) => Render (Elem c a) where
     doc e = case e of
         Added a   -> style green $ doc a
         Removed b -> style red $ doc b
-        Changed c -> doc c
+        Elem c    -> doc c
 
     namedDoc (Named n e) = case e of
         Added a   -> style green $ namedDoc (Named n a)
         Removed b -> style red $ namedDoc (Named n b)
-        Changed c -> namedDoc (Named n c)
+        Elem c    -> namedDoc (Named n c)
 
 
 instance (Render a) => Render (Change a) where
     doc c = case c of
-        Same a -> doc a   -- as if no `Change` were present
+        NoChange a -> doc a
         Change a b ->
             combine vcat
                 [ style red $ text' "-" <+> style align (doc a)

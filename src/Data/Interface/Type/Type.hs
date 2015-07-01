@@ -90,7 +90,8 @@ instance TraverseNames Pred where
     traverseNames f p = case p of
         ClassPred q ts ->
             ClassPred <$> traverseNames f q <*> traverse (traverseNames f) ts
-
+        EqPred r a b ->
+            EqPred r <$> traverseNames f a <*> traverseNames f b
 
 
 data TypeVar = TypeVar String Kind

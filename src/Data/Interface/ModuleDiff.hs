@@ -4,12 +4,16 @@
 
 module Data.Interface.ModuleDiff where
 
-import Data.Foldable ( toList )
 import Data.Function ( on )
+import Data.Bifunctor ( first )
+import Data.Set ( Set )
 
+import Data.Interface.Source ( Origin )
 import Data.Interface.Module
 import Data.Interface.Name
+import Data.Interface.Name.Map
 import Data.Interface.Change
+import Data.Interface.Change.OrdSet
 import Data.Interface.Type
 import Data.Interface.Type.Diff
 
@@ -19,39 +23,35 @@ import Data.Interface.Type.Diff
 -- before or after the changes.
 --
 data ModuleDiff = ModuleDiff
-    { diffModuleName      :: !(Change ModuleName)
-    , diffModuleTypeCons  :: !(DiffMapEq RawName TypeCon)
-    , diffModuleExports   :: ![ExportDiff]
-    --, diffModuleValueDecls :: !(DiffMap RawName ValueDeclChange (Named ValueDecl))
-    --, diffModuleTypeDecls  :: !(DiffMap RawName TypeDeclChange (Named TypeDecl))
-    --, diffModuleExportList :: !ExportListDiff  -- TODO
-    --, diffModuleInstances  :: !(DiffSetEq ClassInstance)
-    } deriving (Show)
-
-
-diffModules :: ModuleInterface -> ModuleInterface -> ModuleDiff
-diffModules a b = ModuleDiff
-    { diffModuleName     = on diff moduleName a b
-    , diffModuleTypeCons = on diffMap moduleTypeCons a b
-    , diffModuleExports  =
-        diffExports (moduleName a, compileModuleExports a)
-                    (compileModuleExports b)
-    --, diffModuleValueDecls = on diffMap moduleValueDecls a b
-    --, diffModuleTypeDecls  = on diffMap moduleTypeDecls a b
-    --, diffModuleExportList = on diffSet (Set.fromList . moduleExportList) a b
-    --, diffModuleInstances  = on diffSet moduleInstances a b
+    { diffModuleName       :: Change ModuleName
+    , diffModuleTypeCons   :: NameMapDiff (Change TypeCon) TypeCon
+    , diffModuleValueDecls :: NameMapDiff ValueDeclDiff ValueDecl
+    , diffModuleTypeDecls  :: NameMapDiff TypeDeclDiff TypeDecl
+    , diffModuleExportList :: OrdSetDiff ExportName
+    , diffModuleInstances  :: Change (Set ClassInstance)  -- TODO
+    , diffModuleOrigins    :: NameMapDiff' SomeName (Change Origin) Origin
     }
 
+instance Diff ModuleInterface ModuleDiff where
+    diff a b = ModuleDiff
+        { diffModuleName       = on diff moduleName a b
+        , diffModuleTypeCons   = on diff moduleTypeCons a b
+        , diffModuleValueDecls = on diff moduleValueDecls a b
+        , diffModuleTypeDecls  = on diff moduleTypeDecls a b
+        , diffModuleExportList = on diff moduleExportList a b
+        , diffModuleInstances  = on diff moduleInstances a b
+        , diffModuleOrigins    = on diff moduleOrigins a b
+        }
 
--- TODO make instance Diff Export ExportDiff
---   this requires factoring out the ModuleName parameter from diffExports
-
-data ExportDiff
-    = DiffValue (Named (Elem ValueDeclDiff ValueDecl))
-    | DiffType (Named (Elem TypeDeclDiff TypeDecl))
-    | SameReExport ExportName
-    | DiffReExport (Elem' ExportName)
-    deriving (Show, Eq, Ord)
+    toChange mdiff =
+        ModuleInterface
+            <$> diffModuleName mdiff
+            <*> toChange (diffModuleTypeCons mdiff)
+            <*> toChange (diffModuleValueDecls mdiff)
+            <*> toChange (diffModuleTypeDecls mdiff)
+            <*> toChange (diffModuleExportList mdiff)
+            <*> toChange (diffModuleInstances mdiff)
+            <*> toChange (diffModuleOrigins mdiff)
 
 
 
@@ -78,61 +78,40 @@ instance Diff TypeDecl TypeDeclDiff where
     toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
 
 
+data ExportDiff
+    = LocalValueDiff (Named ValueDeclDiff)          -- a ValueDeclDiff
+    | LocalTypeDiff (Named TypeDeclDiff)            -- a TypeDeclDiff
+    | ExportDiff (Change Export)                    -- none of the above
+    deriving (Show, Eq, Ord)
 
 
-diffExports :: (ModuleName, [Export]) -> [Export] -> [ExportDiff]
-diffExports (modName, es0) =
-    go ( nameMapFromList valueDecls0
-       , nameMapFromList typeDecls0
-       , nameMapFromList $ reexports es0
-       )
+diffModuleExports :: ModuleDiff -> [Elem ExportDiff Export]
+diffModuleExports mdiff = map go . ordSetDiffElems $ diffModuleExportList mdiff
   where
-    (_names0, valueDecls0, typeDecls0) = splitExports modName es0
+    go :: SetElem ExportName -> Elem ExportDiff Export
+    go e = first makeExportDiff $ lookupExportElem e mdiff
 
-    go :: ( NameMap (Named ValueDecl)   -- original values
-          , NameMap (Named TypeDecl)    -- original types
-          , NameMap ExportName) ->      -- original re-exports
-          [Export] ->                   -- new exports
-          [ExportDiff]                  -- list of export differences
-    go (vds, tds, res) es1 = case es1 of
-        [] -> map (DiffValue . fmap Removed) (toList vds)
-           ++ map (DiffType . fmap Removed) (toList tds)
-           ++ map (DiffReExport . Removed) (toList res)
-        e:es -> case e of
-            LocalValue vd1
-                | Just vd0 <- lookupName vd1 vds ->
-                    DiffValue (named vd1 (Changed (on diff unName vd0 vd1)))
-                        : go (deleteName vd0 vds, tds, res) es
-                | otherwise ->
-                    DiffValue (fmap Added vd1) : go (vds, tds, res) es
-            LocalType td1
-                | Just td0 <- lookupName td1 tds ->
-                    DiffType (named td1 (Changed (on diff unName td0 td1)))
-                        : go (vds, deleteName td0 tds, res) es
-                | otherwise ->
-                    DiffType (fmap Added td1) : go (vds, tds, res) es
-            -- assume re-exports with the same name are equal
-            ReExport n1
-                | Just n0 <- lookupName n1 res ->
-                    SameReExport n1 : go (vds, tds, deleteName n0 res) es
-                | otherwise ->
-                    DiffReExport (Added n1) : go (vds, tds, res) es
+    makeExportDiff :: Change Export -> ExportDiff
+    makeExportDiff c = case c of
+        NoChange e ->           -- this is only possible if  @isSame mdiff@
+            ExportDiff $ NoChange e
+        Change (LocalValue vd0) (LocalValue vd1)
+            | Just n <- matchNames vd0 vd1 ->
+                LocalValueDiff $ named n $ diff (unName vd0) (unName vd1)
+        Change (LocalType td0) (LocalType td1)
+            | Just n <- matchNames td0 td1 ->
+                LocalTypeDiff $ named n $ diff (unName td0) (unName td1)
+        c -> ExportDiff c
+    
+
+lookupExportElem ::
+    SetElem ExportName -> ModuleDiff -> Elem (Change Export) Export
+lookupExportElem e mdiff =
+    fmap unsafeFindExport (toChange mdiff) `applyChange` setElemChange e
 
 
-instance HasRawName ExportDiff where
-    rawName = rawName . someName
-    rename f ed = case ed of
-        DiffValue n -> DiffValue $ rename f n
-        DiffType n  -> DiffType $ rename f n
-        SameReExport n -> SameReExport $ rename f n
-        DiffReExport e -> DiffReExport $ fmap (rename f) e
-
-instance HasNamespace ExportDiff where
-    namespace = namespace . someName
-
-instance HasSomeName ExportDiff where
-    someName ed = case ed of
-        DiffValue n -> SomeName Values (rawName n)
-        DiffType n  -> SomeName Types (rawName n)
-        SameReExport n -> someName n 
-        DiffReExport e -> someName $ extractElem e
+isLocalElemChange ::
+    Elem (Change (Qual a)) (Qual a) ->
+    ModuleDiff ->
+    Elem (Change Bool) Bool
+isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e

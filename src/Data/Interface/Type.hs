@@ -8,8 +8,6 @@ module Data.Interface.Type
 )
 where
 
-import Data.Interface.Name
-
 import Data.Interface.Type.Type
 import Data.Interface.Type.Env
 

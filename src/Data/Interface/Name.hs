@@ -20,9 +20,6 @@ import Data.Monoid
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
-import Data.Map ( Map )
-import qualified Data.Map as Map
-
 import Data.Interface.Source ( Origin )
 
 
@@ -160,17 +157,37 @@ getQualName :: (HasName s n) => Qual n -> Qual (Name s)
 getQualName = fmap getName
 {-# INLINABLE getQualName #-}
 
+-- | @matchNames a b@ is @Just@ the name of @a@ and @b@ if they have the same
+-- name, or @Nothing@ if they have different names.
+matchNames :: (HasName s n, HasName s n') => n -> n' -> Maybe (Name s)
+matchNames a b
+    | getName a == name = Just name
+    | otherwise = Nothing
+  where
+    name = getName b
+
 
 -- * Named
 
-data Named a = Named !RawName a
+data Named' n a = Named !n a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+type Named = Named' RawName
+type SomeNamed = Named' SomeName
 
 named :: (HasRawName n) => n -> a -> Named a
 named n = Named (rawName n)
 
-unName :: Named a -> a
+unName :: Named' n a -> a
 unName (Named _ a) = a
+
+mapNamed :: (a -> b) -> Named' n a -> Named' n b
+mapNamed = fmap
+{-# INLINABLE mapNamed #-}
+
+
+--wrapNamed :: (HasRawName a) => a -> Named a
+--wrapNamed a = Named (rawName a) a
 
 
 instance HasRawName (Named a) where
@@ -212,66 +229,9 @@ shouldUnqualify qc (Qual mn _) =
 
 -- | The qualified or unqualified name, depending on context.
 resolveQual :: (HasRawName n) => QualContext -> Qual n -> String
-resolveQual qc qualName@(Qual modName n)
-    | shouldUnqualify qc qualName = rawName n
-    | otherwise = showQualName qualName
-
-
--- * NameMap
-
-type NameMap = Map RawName
-
-nameMapFromList :: (HasRawName a) => [a] -> NameMap a
-nameMapFromList = Map.fromList . map (\x -> (rawName x, x))
-
-emptyNameMap :: NameMap a
-emptyNameMap = Map.empty
-
-insertNamed :: (HasRawName a) => a -> NameMap a -> NameMap a
-insertNamed a = Map.insert (rawName a) a
-
-lookupName :: (HasName s n, HasName s a) => n -> NameMap a -> Maybe a
-lookupName = Map.lookup . rawName
-{-# INLINABLE lookupName #-}
-
-lookupRawName :: RawName -> NameMap a -> Maybe a
-lookupRawName = Map.lookup
-{-# INLINABLE lookupRawName #-}
-
-deleteName :: (HasName s n, HasName s a) => n -> NameMap a -> NameMap a
-deleteName = Map.delete . rawName
-
-renameMap :: (HasRawName a) =>
-    (RawName -> RawName) ->             -- injective renaming function
-    NameMap a -> NameMap a
-renameMap ren = Map.map (rename ren) . Map.mapKeys ren
-
--- | Remove all @(name, value)@ pairs in which @name@ or @value@ contains
--- a name that fails to satisfay the predicate.
-filterMapNames ::
-    (TraverseNames k, TraverseNames a) =>
-    (RawName -> Bool) ->
-    Map k a -> Map k a
-filterMapNames f = Map.filterWithKey $ \k a -> allNames f k && allNames f a
-
-
-traverseNamedElements ::
-    (Applicative f) =>
-    (Named a -> f (Named a)) ->
-    NameMap a -> f (NameMap a)
-traverseNamedElements f =
-    traverseMapPairs (fmap pair . f . uncurry Named)
-  where
-    pair :: Named a -> (RawName, a)
-    pair (Named n a) = (n, a)
-    
-traverseMapPairs ::
-    (Applicative f, Ord k) =>
-    ((k,a) -> f (k,a)) ->
-    Map k a -> f (Map k a)
-traverseMapPairs f =
-    fmap Map.fromList . traverse f . Map.toList
-
+resolveQual qc q
+    | shouldUnqualify qc q = rawName q
+    | otherwise = showQualName q
 
 
 -- * TraverseNames
@@ -320,12 +280,6 @@ instance TraverseNames (Name s) where
 
 instance (TraverseNames a) => TraverseNames (Named a) where
     traverseNames f (Named n a) = Named <$> f n <*> traverseNames f a
-
-instance (TraverseNames k, TraverseNames a, Ord k) =>
-            TraverseNames (Map k a) where
-    traverseNames f = traverseMapPairs onPair
-      where
-        onPair (k,a) = (,) <$> traverseNames f k <*> traverseNames f a
 
 instance (TraverseNames a, Ord a) => TraverseNames (Set a) where
     traverseNames f =

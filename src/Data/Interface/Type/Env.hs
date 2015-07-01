@@ -5,6 +5,7 @@ import Data.Map ( Map )
 import qualified Data.Map as Map
 
 import Data.Interface.Name
+import Data.Interface.Name.Map
 
 import Data.Interface.Type.Type
 
@@ -18,7 +19,7 @@ emptyTypeEnv = TypeEnv Map.empty
 
 lookupModule :: ModuleName -> TypeEnv -> NameMap TypeCon
 lookupModule modName =
-    fromMaybe Map.empty . Map.lookup modName . typeEnvMap
+    fromMaybe emptyNameMap . Map.lookup modName . typeEnvMap
 
 -- | Apply the given transformation to the corresponding module map.
 -- If there is no map for that module, it is created.
@@ -27,7 +28,7 @@ updateModule ::
     (NameMap TypeCon -> NameMap TypeCon) ->
     TypeEnv -> TypeEnv
 updateModule modName f =
-    TypeEnv . Map.alter (Just . f . fromMaybe Map.empty) modName . typeEnvMap
+    TypeEnv . Map.alter (Just . f . fromMaybe emptyNameMap) modName . typeEnvMap
 
 
 data MissingType
@@ -36,16 +37,16 @@ data MissingType
     deriving (Show, Eq)
 
 lookupType :: Qual TypeName -> TypeEnv -> Either MissingType TypeCon
-lookupType qual env =
+lookupType q env =
     case Map.lookup modName $ typeEnvMap env of
         Nothing -> Left $ MissingModule modName
-        Just tmap -> case Map.lookup (rawName qual) tmap of
-            Nothing -> Left $ MissingType qual
-            Just t  -> Right t
+        Just tmap -> case lookupName q tmap of
+            Nothing -> Left $ MissingType q
+            Just t  -> Right $ unName t
   where
-    modName = qualModuleName qual
+    modName = qualModuleName q
 
 
 insertType :: Qual TypeCon -> TypeEnv -> TypeEnv
-insertType (Qual modName typeCon) = updateModule modName $ insertNamed typeCon
+insertType (Qual modName typeCon) = updateModule modName $ insertHasName typeCon
 

@@ -28,6 +28,9 @@ instance (Diff a c) => Diff (TypeF a) (DiffTypeF a c) where
     diff = diffTypeF
     {-# INLINABLE diff #-}
 
+    noDiff = SameTypeF . fmap noDiff
+    {-# INLINABLE noDiff #-}
+
     toChange d = case d of
         SameTypeF fc -> traverse toChange fc
         DiffTypeF r -> toChange r
@@ -93,4 +96,6 @@ pattern TypeDiff f = FF.Fix f
 
 instance Diff Type TypeDiff where
     diff a b = FF.embed $ diffTypeF (FF.project a) (FF.project b)
+    noDiff = FF.embed . noDiff . FF.project
+
     toChange = fmap FF.embed . toChange . FF.project

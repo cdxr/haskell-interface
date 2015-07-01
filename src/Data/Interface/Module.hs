@@ -7,7 +7,11 @@ module Data.Interface.Module
   , ExportName
   , ClassInstance(..)
   , emptyModuleInterface
-  , lookupOrigin
+  , makeModuleInterface
+  , isLocal
+  , findExport
+  , unsafeFindExport
+  -- , lookupOrigin
   , filterInterfaceNames
 -- ** Exports
   , Export(..)
@@ -20,17 +24,17 @@ module Data.Interface.Module
  )
 where
 
+import Data.Foldable
 import Data.Maybe ( catMaybes, mapMaybe, fromMaybe )
-
-import Data.Map ( Map )
-import qualified Data.Map as Map
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
 import Data.Interface.Source
 import Data.Interface.Name
+import Data.Interface.Name.Map
 import Data.Interface.Type
+import Data.Interface.Change.OrdSet
 
 import Data.Interface.Module.Decl
 
@@ -39,17 +43,17 @@ import Data.Interface.Module.Decl
 -- exposed to dependent packages. ModuleInterface is the basis for comparison
 -- when examining differences between module versions.
 data ModuleInterface = ModuleInterface
-    { moduleName       :: !ModuleName
-    , moduleTypeCons   :: !(NameMap TypeCon)
+    { moduleName       :: ModuleName
+    , moduleTypeCons   :: NameMap TypeCon
         -- ^ exposed type constructors originating in this module
-    , moduleValueDecls :: !(NameMap (Named ValueDecl))
+    , moduleValueDecls :: NameMap ValueDecl
         -- ^ exposed values (identifiers, data constructors, pattern synonyms)
-    , moduleTypeDecls  :: !(NameMap (Named TypeDecl))
+    , moduleTypeDecls  :: NameMap TypeDecl
         -- ^ exposed types (data/newtypes, type synonyms, class definitions)
-    , moduleExportList :: ![ExportName]
-    , moduleInstances  :: !(Set ClassInstance)
+    , moduleExportList :: OrdSet ExportName
+    , moduleInstances  :: Set ClassInstance
 
-    , moduleOrigins :: Map SomeName Origin
+    , moduleOrigins :: NameMap' SomeName Origin
         -- ^ origins of _all_ entities referenced in this interface
 
  -- , moduleDepends :: !(Set ModuleName) -- cached list of dependencies  TODO
@@ -82,15 +86,36 @@ emptyModuleInterface modName = ModuleInterface
     , moduleTypeCons   = emptyNameMap
     , moduleValueDecls = emptyNameMap
     , moduleTypeDecls  = emptyNameMap
-    , moduleExportList = []
+    , moduleExportList = mempty
     , moduleInstances  = Set.empty
-    , moduleOrigins    = Map.empty
+    , moduleOrigins    = emptyNameMap
     }
+
+
+-- | Determine if the qualified entity originates in the given module
+isLocal :: Qual a -> ModuleInterface -> Bool
+isLocal (Qual mn _) iface = moduleName iface == mn
+
+
+findExport :: ModuleInterface -> ExportName -> Maybe Export
+findExport iface en
+    | not (isLocal en iface) = Just $ ReExport en
+    | otherwise = case namespace en of
+        Values -> LocalValue <$> lookupRawName en (moduleValueDecls iface)
+        Types -> LocalType <$> lookupRawName en (moduleTypeDecls iface)
+
+
+unsafeFindExport :: ModuleInterface -> ExportName -> Export
+unsafeFindExport iface en = fromMaybe errMsg (findExport iface en)
+  where
+    errMsg = error $ "unsafeFindExport: could not find " 
+                  ++ show (rawName en) ++ " in module "
+                  ++ show (moduleName iface)
 
 
 lookupOrigin :: (HasSomeName n) => n -> ModuleInterface -> Origin
 lookupOrigin n =
-    fromMaybe UnknownSource . Map.lookup (someName n) . moduleOrigins
+    maybe UnknownSource unName . lookupSomeName n . moduleOrigins
 
 
 hasDecl :: SomeName -> ModuleInterface -> Bool
@@ -104,7 +129,7 @@ hasDecl n ModuleInterface{..} = case namespace n of
 
 filterExports :: (ExportName -> Bool) -> ModuleInterface -> ModuleInterface
 filterExports f iface = iface
-    { moduleExportList = filter f $ moduleExportList iface }
+    { moduleExportList = filterOrdSet f $ moduleExportList iface }
 
 
 -- | Remove every interface entity containing a reference to a name that does
@@ -116,7 +141,7 @@ filterInterfaceNames f ModuleInterface{..} =
             , moduleTypeCons   = filterMapNames f moduleTypeCons
             , moduleValueDecls = filterMapNames f moduleValueDecls
             , moduleTypeDecls  = filterMapNames f moduleTypeDecls
-            , moduleExportList = filter (allNames f) moduleExportList
+            , moduleExportList = filterOrdSet (allNames f) moduleExportList
             , moduleInstances  = Set.filter (allNames f) moduleInstances
             , moduleOrigins    = filterMapNames f moduleOrigins
             }
@@ -135,9 +160,29 @@ instance TraverseNames ModuleInterface where
           <$> traverseNames f moduleTypeCons
           <*> traverseNames f moduleValueDecls
           <*> traverseNames f moduleTypeDecls
-          <*> traverse (traverseNames f) moduleExportList
+          <*> unsafeTraverseOrdSet (traverseNames f) moduleExportList
           <*> traverseNames f moduleInstances
           <*> traverseNames f moduleOrigins
+
+
+makeModuleInterface ::
+    ModuleName ->
+    NameMap TypeCon ->
+    [Export] ->
+    [ClassInstance] ->
+    ModuleInterface
+makeModuleInterface modName typeMap exports instances =
+    ModuleInterface
+        { moduleName       = modName
+        , moduleTypeCons   = typeMap
+        , moduleValueDecls = makeNameMap valueDecls
+        , moduleTypeDecls  = makeNameMap typeDecls
+        , moduleExportList = makeOrdSet exportList
+        , moduleInstances  = Set.fromList instances
+        , moduleOrigins    = emptyNameMap  -- TODO
+        }
+  where
+    (exportList, valueDecls, typeDecls) = splitExports modName exports
 
 
 data Export
@@ -180,23 +225,8 @@ reexports = mapMaybe reex
 -- This is called `compileModuleExports` rather than "moduleExports" to
 -- emphasize the amount of work taking place.
 compileModuleExports :: ModuleInterface -> [Export]
-compileModuleExports iface = map mkExport (moduleExportList iface)
-  where
-    mkExport :: ExportName -> Export
-    mkExport exName
-        | moduleName iface /= modName = ReExport exName
-        | otherwise = case namespace exName of
-            Values -> LocalValue . get $ moduleValueDecls iface
-            Types -> LocalType . get $ moduleTypeDecls iface
-      where
-        modName = qualModuleName exName
-
-        get :: NameMap a -> a
-        get = takeJust . lookupRawName (rawName exName)
-
-        takeJust Nothing =
-            error $ "compileModuleExports: missing name: " ++ rawName exName
-        takeJust (Just a) = a
+compileModuleExports iface =
+    map (unsafeFindExport iface) . toList $ moduleExportList iface
             
 
 lookupValueDecl :: ValueName -> ModuleInterface -> Maybe (Named ValueDecl)

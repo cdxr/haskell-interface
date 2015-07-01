@@ -7,7 +7,6 @@ import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 
 import GHC
 
@@ -33,24 +32,33 @@ import qualified Kind
 import Data.Interface as Interface
 import Data.Interface.Type.Build as Build
 
-import Debug.Trace
+
+type TargetInterface = String
+
+
+readInterface :: TargetInterface -> IO ModuleInterface
+readInterface target = do
+    is <- readModuleInterfaces [target]
+    case is of
+        [iface] -> pure iface
+        _ -> error "readInterface"  -- TODO
 
 
 -- | Using a fresh GHC session, produce a `ModuleInterface` for each of
 -- the given module targets.
 readModuleInterfaces
-    :: [String]              -- ^ filepaths and/or module names
+    :: [TargetInterface]              -- ^ filepaths and/or module names
     -> IO [ModuleInterface]  -- ^ ModuleInterfaces in topological order
-readModuleInterfaces targetStrs =
+readModuleInterfaces targets =
     withGhc $ do
         -- prepare package state, ignoring output (no need for linking)
         _ <- setSessionDynFlags =<< getSessionDynFlags
 
         -- infer target modules
-        targets <- forM targetStrs $ \s ->
+        ghcTargets <- forM targets $ \s ->
             guessTarget s Nothing
 
-        moduleInterfacesForTargets targets
+        moduleInterfacesForTargets ghcTargets
 
 
 -- | Produce a `ModuleInterface` for each compilation target in
@@ -68,7 +76,7 @@ moduleInterfacesForTargets targets = do
 
     runLoadMod $
         forM (listModSummaries moduleGraph) $
-            makeModuleInterface <=< liftGHC . (typecheckModule <=< parseModule)
+            makeInterface <=< liftGHC . (typecheckModule <=< parseModule)
   where
     -- Sort the modules topologically and discard hs-boot modules.
     -- The topological order is not currently used, but it will be
@@ -128,8 +136,8 @@ setTargetModule ghcModule =
 
 -- | Determine if the given named entity is defined in the current target
 -- module.
-isLocal :: (GHC.NamedThing a) => a -> LoadModule Bool
-isLocal a = LoadModule $ do
+isLocalThing :: (GHC.NamedThing a) => a -> LoadModule Bool
+isLocalThing a = LoadModule $ do
     mGhcModule <- gets lmsCurrentModule
     pure $ case mGhcModule of
         Nothing -> False      -- without a module, there are no "local" names
@@ -153,7 +161,7 @@ linkTyCon tyCon = do
 -- previous call to `setTargetModule`. See `linkTyCon`.
 seenLocalTyCons :: LoadModule [GHC.TyCon]
 seenLocalTyCons =
-    filterM isLocal . uniqSetToList =<< LoadModule (gets lmsExposedTyCons)
+    filterM isLocalThing . uniqSetToList =<< LoadModule (gets lmsExposedTyCons)
 
 
 -- | Store an `Interface.Origin` for the given entity. This should be called
@@ -169,8 +177,8 @@ storeOrigin ns a = do
 
 -- * Building ModuleInterfaces
 
-makeModuleInterface :: GHC.TypecheckedModule -> LoadModule ModuleInterface
-makeModuleInterface tcMod = do
+makeInterface :: GHC.TypecheckedModule -> LoadModule ModuleInterface
+makeInterface tcMod = do
     _ <- liftGHC $ loadModule tcMod
 
     let modInfo = GHC.moduleInfo tcMod
@@ -179,8 +187,7 @@ makeModuleInterface tcMod = do
 
     setTargetModule thisModule
 
-    (exportList, valueDecls, typeDecls) <-
-        splitExports modName <$> mapM loadExport (modInfoExports modInfo)
+    exports <- mapM loadExport (modInfoExports modInfo)
 
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
 
@@ -193,15 +200,7 @@ makeModuleInterface tcMod = do
         modify $ \env -> foldr insertType env typeCons
         gets $ Interface.lookupModule modName
 
-    pure ModuleInterface
-        { Interface.moduleName = modName
-        , moduleTypeCons   = typeMap
-        , moduleValueDecls = nameMapFromList valueDecls
-        , moduleTypeDecls  = nameMapFromList typeDecls
-        , moduleExportList = exportList
-        , moduleInstances  = Set.fromList instances
-        , moduleOrigins    = Map.empty  -- TODO
-        }
+    pure $ makeModuleInterface modName typeMap exports instances
   where
     loadClassInstance :: GHC.ClsInst -> LoadModule ClassInstance
     loadClassInstance ci =
@@ -211,7 +210,7 @@ makeModuleInterface tcMod = do
 
 loadExport :: GHC.Name -> LoadModule Export
 loadExport ghcName = do
-    local <- isLocal ghcName
+    local <- isLocalThing ghcName
     mTyThing <- liftGHC $ GHC.lookupName ghcName
     case mTyThing of
         Nothing ->
