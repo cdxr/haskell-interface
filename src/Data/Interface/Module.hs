@@ -17,7 +17,6 @@ module Data.Interface.Module
   , Export(..)
   , compileModuleExports
   , splitExports
-  , reexports
 
 -- * Re-exports
   , module Data.Interface.Module.Decl
@@ -25,7 +24,7 @@ module Data.Interface.Module
 where
 
 import Data.Foldable
-import Data.Maybe ( catMaybes, mapMaybe, fromMaybe )
+import Data.Maybe ( catMaybes, fromMaybe )
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
@@ -60,7 +59,31 @@ data ModuleInterface = ModuleInterface
     } deriving (Show)
 
 
-type ExportName = Qual SomeName
+data ExportName
+    = LocalName SomeName
+    | ForeignName (Qual SomeName)
+    deriving (Show, Eq, Ord)
+
+{- ExportName: We avoid qualifying local exports because when it comes time
+   to compare the exports of two modules, it shouldn't matter if the modules
+   have the same name. The `Eq` instance will match up local names with local
+   names.
+-}
+
+instance HasRawName ExportName where
+    rawName en = case en of
+        LocalName n -> rawName n
+        ForeignName q -> rawName q
+    rename f en = case en of
+        LocalName n -> LocalName $ rename f n
+        ForeignName q -> ForeignName $ rename f q
+
+instance TraverseNames ExportName where
+    traverseNames f en = case en of
+        LocalName sn  -> LocalName <$> traverseNames f sn
+        ForeignName q -> ForeignName <$> traverseNames f q
+
+
 
 type ClassName = RawName
 
@@ -98,11 +121,11 @@ isLocal (Qual mn _) iface = moduleName iface == mn
 
 
 findExport :: ModuleInterface -> ExportName -> Maybe Export
-findExport iface en
-    | not (isLocal en iface) = Just $ ReExport en
-    | otherwise = case namespace en of
-        Values -> LocalValue <$> lookupRawName en (moduleValueDecls iface)
-        Types -> LocalType <$> lookupRawName en (moduleTypeDecls iface)
+findExport iface en = case en of
+    ForeignName q -> Just $ ReExport q
+    LocalName n -> case namespace n of
+        Values -> LocalValue <$> lookupRawName n (moduleValueDecls iface)
+        Types -> LocalType <$> lookupRawName n (moduleTypeDecls iface)
 
 
 unsafeFindExport :: ModuleInterface -> ExportName -> Export
@@ -148,9 +171,9 @@ filterInterfaceNames f ModuleInterface{..} =
     in filterExports (keep iface) iface
   where
     keep :: ModuleInterface -> ExportName -> Bool
-    keep iface (Qual m n)
-        | m /= moduleName = True             -- keep re-exports
-        | otherwise = hasDecl n iface
+    keep iface en = case en of
+        LocalName n -> hasDecl n iface
+        ForeignName{} -> True                   -- keep all re-exports
 
 
 -- | module name is not included
@@ -182,44 +205,36 @@ makeModuleInterface modName typeMap exports instances =
         , moduleOrigins    = emptyNameMap  -- TODO
         }
   where
-    (exportList, valueDecls, typeDecls) = splitExports modName exports
+    (exportList, valueDecls, typeDecls) = splitExports exports
 
 
 data Export
     = LocalValue (Named ValueDecl)
     | LocalType (Named TypeDecl)
-    | ReExport ExportName
+    | ReExport (Qual SomeName)
     deriving (Show, Eq, Ord)
 
-exportName :: ModuleName -> Export -> ExportName
-exportName modName e = case e of
-    LocalValue n -> Qual modName $ someName n
-    LocalType n  -> Qual modName $ someName n
-    ReExport q   -> q
+exportName :: Export -> ExportName
+exportName e = case e of
+    LocalValue n -> LocalName (someName n)
+    LocalType n  -> LocalName (someName n)
+    ReExport q   -> ForeignName q
 
 
 -- | Produce a tuple containing a list of all export names, a list of all
 -- value declarations, and a list of all type declarations.
 splitExports ::
-    ModuleName ->
     [Export] ->
     ([ExportName], [Named ValueDecl], [Named TypeDecl])
-splitExports modName es =
+splitExports es =
     let (names, mvals, mtypes) = unzip3 $ map makeTup es
     in (names, catMaybes mvals, catMaybes mtypes)
   where
     makeTup e = case e of
-        LocalValue a -> (exportName modName e, Just a, Nothing)
-        LocalType a  -> (exportName modName e, Nothing, Just a)
-        ReExport{}   -> (exportName modName e, Nothing, Nothing)
+        LocalValue a -> (exportName e, Just a, Nothing)
+        LocalType a  -> (exportName e, Nothing, Just a)
+        ReExport{}   -> (exportName e, Nothing, Nothing)
 
-
-reexports :: [Export] -> [ExportName]
-reexports = mapMaybe reex
-  where
-    reex (ReExport n) = Just n
-    reex _            = Nothing
-        
 
 -- | Produce a list all exports provided by the module.
 -- This is called `compileModuleExports` rather than "moduleExports" to

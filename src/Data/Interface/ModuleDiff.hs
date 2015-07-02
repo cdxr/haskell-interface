@@ -101,7 +101,7 @@ diffModuleExports mdiff = map go . ordSetDiffElems $ diffModuleExportList mdiff
         Change (LocalType td0) (LocalType td1)
             | Just n <- matchNames td0 td1 ->
                 LocalTypeDiff $ named n $ diff (unName td0) (unName td1)
-        c -> ExportDiff c
+        _ -> ExportDiff c
     
 
 lookupExportElem ::
