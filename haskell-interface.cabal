@@ -28,6 +28,7 @@ library
     Data.Interface.Type.Build
     Data.Interface.Module
     Data.Interface.Module.Decl
+    Data.Interface.Module.Export
     Data.Interface.ModuleDiff
   -- other-modules:
   -- other-extensions:

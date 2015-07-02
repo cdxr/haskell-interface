@@ -6,7 +6,6 @@ module Data.Interface.Module
     ModuleInterface(..)
   , ExportName
   , ClassInstance(..)
-  , emptyModuleInterface
   , makeModuleInterface
   , isLocal
   , findExport
@@ -24,7 +23,7 @@ module Data.Interface.Module
 where
 
 import Data.Foldable
-import Data.Maybe ( catMaybes, fromMaybe )
+import Data.Maybe ( fromMaybe )
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
@@ -36,6 +35,7 @@ import Data.Interface.Type
 import Data.Interface.Change.OrdSet
 
 import Data.Interface.Module.Decl
+import Data.Interface.Module.Export
 
 
 -- | A module's visible interface, consisting of all components that are
@@ -59,32 +59,6 @@ data ModuleInterface = ModuleInterface
     } deriving (Show)
 
 
-data ExportName
-    = LocalName SomeName
-    | ForeignName (Qual SomeName)
-    deriving (Show, Eq, Ord)
-
-{- ExportName: We avoid qualifying local exports because when it comes time
-   to compare the exports of two modules, it shouldn't matter if the modules
-   have the same name. The `Eq` instance will match up local names with local
-   names.
--}
-
-instance HasRawName ExportName where
-    rawName en = case en of
-        LocalName n -> rawName n
-        ForeignName q -> rawName q
-    rename f en = case en of
-        LocalName n -> LocalName $ rename f n
-        ForeignName q -> ForeignName $ rename f q
-
-instance TraverseNames ExportName where
-    traverseNames f en = case en of
-        LocalName sn  -> LocalName <$> traverseNames f sn
-        ForeignName q -> ForeignName <$> traverseNames f q
-
-
-
 type ClassName = RawName
 
 -- | A class instance definition, consisting of the class name and list of
@@ -101,18 +75,6 @@ data ClassInstance = ClassInstance !ClassName [Type]
 instance TraverseNames ClassInstance where
     traverseNames f (ClassInstance n ts) =
         ClassInstance <$> f n <*> traverse (traverseNames f) ts
-
-
-emptyModuleInterface :: ModuleName -> ModuleInterface
-emptyModuleInterface modName = ModuleInterface
-    { moduleName       = modName
-    , moduleTypeCons   = emptyNameMap
-    , moduleValueDecls = emptyNameMap
-    , moduleTypeDecls  = emptyNameMap
-    , moduleExportList = mempty
-    , moduleInstances  = Set.empty
-    , moduleOrigins    = emptyNameMap
-    }
 
 
 -- | Determine if the qualified entity originates in the given module
@@ -206,34 +168,6 @@ makeModuleInterface modName typeMap exports instances =
         }
   where
     (exportList, valueDecls, typeDecls) = splitExports exports
-
-
-data Export
-    = LocalValue (Named ValueDecl)
-    | LocalType (Named TypeDecl)
-    | ReExport (Qual SomeName)
-    deriving (Show, Eq, Ord)
-
-exportName :: Export -> ExportName
-exportName e = case e of
-    LocalValue n -> LocalName (someName n)
-    LocalType n  -> LocalName (someName n)
-    ReExport q   -> ForeignName q
-
-
--- | Produce a tuple containing a list of all export names, a list of all
--- value declarations, and a list of all type declarations.
-splitExports ::
-    [Export] ->
-    ([ExportName], [Named ValueDecl], [Named TypeDecl])
-splitExports es =
-    let (names, mvals, mtypes) = unzip3 $ map makeTup es
-    in (names, catMaybes mvals, catMaybes mtypes)
-  where
-    makeTup e = case e of
-        LocalValue a -> (exportName e, Just a, Nothing)
-        LocalType a  -> (exportName e, Nothing, Just a)
-        ReExport{}   -> (exportName e, Nothing, Nothing)
 
 
 -- | Produce a list all exports provided by the module.
