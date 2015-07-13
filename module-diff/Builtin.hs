@@ -17,5 +17,5 @@ builtinTasks =
   where
     makeComparison name dir (a, b) =
         let dir' = "test" </> "modules" </> dir
-        in (name, CompareInterfaces (dir' </> a) (dir' </> b))
+        in (name, CompareModules (dir' </> a) (dir' </> b))
 

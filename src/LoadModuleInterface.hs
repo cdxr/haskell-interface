@@ -15,15 +15,16 @@ import qualified GHC.Paths
 import DynFlags ( getDynFlags )
 
 import qualified Name
+import qualified Module
 import Digraph ( flattenSCCs )
 import HscTypes ( isBootSummary )
+import FastString ( FastString, unpackFS, mkFastString )
 import UniqSet
 import qualified ConLike
 import qualified PatSyn
 import qualified Outputable as Out
 import qualified InstEnv
 import qualified SrcLoc
-import qualified FastString
 import qualified Var
 import qualified TyCon
 import qualified Type
@@ -33,39 +34,109 @@ import Data.Interface as Interface
 import Data.Interface.Type.Build as Build
 
 
-type TargetInterface = String
+-- | The module target; either a source module that needs to be compiled,
+-- or the name of a module that is installed or has a local source.
+data ModuleGoal
+    = SourceGoal GHC.TargetId
+        -- ^ a GHC compilation target
+    | ModuleGoal GHC.ModuleName (Maybe GHC.PackageKey)
+        -- ^ name and optional `PackageKey`; when @Nothing@ the module might
+        -- be a compilation target
+    deriving (Eq)
+
+-- | Guess the intended `ModuleGoal` from a `String`. When given a path to a source
+-- file, it will be compiled to produce the interface. When given the name of
+-- a module, the corresponding local source file will be used if available;
+-- otherwise, the module will be searched for in the package database.
+guessGoal :: String -> Ghc ModuleGoal
+guessGoal s = do
+    Target tid _ _ <- guessTarget s Nothing
+    pure $ case tid of
+        TargetModule modName -> ModuleGoal modName Nothing
+        _ -> SourceGoal tid
+
+instance Show ModuleGoal where
+    showsPrec p g = showParen (p > 10) $ case g of
+        SourceGoal t ->
+            showString "SourceGoal<" . showTargetId t . showChar '>'
+        ModuleGoal modName mPkgKey ->
+            showString "ModuleGoal<" .
+            showModName modName .
+            shows (fmap Module.packageKeyFS mPkgKey) .
+            showChar '>'
+      where
+        showTargetId t = case t of
+            TargetModule n -> showString "TargetModule " . showModName n
+            TargetFile fp mp ->
+                showString "TargetFile " . shows fp . showChar ' ' . shows mp
+        showModName = showString . GHC.moduleNameString
 
 
-readInterface :: TargetInterface -> IO ModuleInterface
-readInterface target = do
-    is <- readModuleInterfaces [target]
-    case is of
-        [iface] -> pure iface
-        _ -> error "readInterface"  -- TODO
+loadInterface :: ModuleGoal -> IO ModuleInterface
+loadInterface = withGhc . makeInterface
+
+makeInterface :: ModuleGoal -> Ghc ModuleInterface
+makeInterface g = case g of
+    SourceGoal tid -> do
+        let obj_allowed = True
+        head <$>  -- TODO
+            moduleInterfacesForTargets [Target tid obj_allowed Nothing]
+    ModuleGoal modName mPkgKey -> do
+        packageModuleInterface modName mPkgKey
+
+{-
+data ModuleGoal = ModuleGoal GHC.ModuleName (Maybe GHC.PackageKey)
+    deriving (Eq, Ord)
+
+makeInterface :: ModuleGoal -> Ghc ModuleInterface
+makeInterface (ModuleGoal modIface = 
+-}
 
 
--- | Using a fresh GHC session, produce a `ModuleInterface` for each of
--- the given module targets.
-readModuleInterfaces
-    :: [TargetInterface]              -- ^ filepaths and/or module names
-    -> IO [ModuleInterface]  -- ^ ModuleInterfaces in topological order
-readModuleInterfaces targets =
-    withGhc $ do
-        -- prepare package state, ignoring output (no need for linking)
-        _ <- setSessionDynFlags =<< getSessionDynFlags
+-- | Construct a `ModuleInterface`, given a `ModuleName` and optional
+-- `PackageKey`. Without an explicitly given package, this will use
+-- source modules found in the local path.
+--
+packageModuleInterface ::
+    GHC.ModuleName -> Maybe GHC.PackageKey -> Ghc ModuleInterface
+packageModuleInterface modName mPkgKey = do
+    ghcModule <- GHC.lookupModule modName (fmap Module.packageKeyFS mPkgKey)
+    may <- getModuleInfo ghcModule
+    case may of
+        Nothing ->
+            error $ "packageModuleInterface: failed to load module "
+                 ++ GHC.moduleNameString modName
+        Just modInfo -> runLoadMod $ makeModuleInfoInterface ghcModule modInfo
 
-        -- infer target modules
-        ghcTargets <- forM targets $ \s ->
-            guessTarget s Nothing
 
-        moduleInterfacesForTargets ghcTargets
+{-
+        dynFlags <- getSessionDynFlags
+
+        -- these flags are necessary to use 'setContext'
+        _ <- setSessionDynFlags $ dynFlags
+            { ghcMode = CompManager
+            , hscTarget = HscInterpreted
+            , ghcLink = LinkInMemory
+            }
+
+        setContext [ IIModule $ mkModuleName "Test"
+                   , IIDecl $ simpleImportDecl modName
+                   ]
+-}
+
+{-
+        case lookupModuleInAllPackages dynFlags modName of
+            [] -> Nothing
+            (m, pkgConfig) : _ -> Just $
+-}
+            
 
 
 -- | Produce a `ModuleInterface` for each compilation target in
 -- topological order.
-moduleInterfacesForTargets
-    :: [Target]  -- filepaths and/or module names
-    -> Ghc [ModuleInterface]
+moduleInterfacesForTargets ::
+    [Target] ->    -- filepaths and/or module names
+    Ghc [ModuleInterface]
 moduleInterfacesForTargets targets = do
     setTargets targets
 
@@ -76,7 +147,8 @@ moduleInterfacesForTargets targets = do
 
     runLoadMod $
         forM (listModSummaries moduleGraph) $
-            makeInterface <=< liftGHC . (typecheckModule <=< parseModule)
+            typecheckedModuleInterface <=<
+                liftGHC . (typecheckModule <=< parseModule)
   where
     -- Sort the modules topologically and discard hs-boot modules.
     -- The topological order is not currently used, but it will be
@@ -177,19 +249,30 @@ storeOrigin ns a = do
 
 -- * Building ModuleInterfaces
 
-makeInterface :: GHC.TypecheckedModule -> LoadModule ModuleInterface
-makeInterface tcMod = do
+typecheckedModuleInterface ::
+    GHC.TypecheckedModule -> LoadModule ModuleInterface
+typecheckedModuleInterface tcMod = do
     _ <- liftGHC $ loadModule tcMod
+    let ghcModule = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
+    makeModuleInfoInterface ghcModule $ GHC.moduleInfo tcMod
 
-    let modInfo = GHC.moduleInfo tcMod
-        thisModule = ms_mod . pm_mod_summary $ tm_parsed_module tcMod
-        modName = makeModuleName thisModule
 
-    setTargetModule thisModule
+makeModuleInfoInterface ::
+    GHC.Module -> GHC.ModuleInfo -> LoadModule ModuleInterface
+makeModuleInfoInterface ghcModule modInfo = do
+    let modName = makeModuleName ghcModule
+
+    setTargetModule ghcModule
 
     exports <- mapM loadExport (modInfoExports modInfo)
 
+    let instances = []
+    {-
+    TODO: The following will fail for package modules.
+    I need to find another way to load class instances.
+
     instances <- mapM loadClassInstance $ modInfoInstances modInfo
+    -}
 
     -- Insert a `TypeCon` into the `TypeEnv` for each linked type constructor
     -- that is both defined in and exposed by the current module. Then, return
@@ -416,7 +499,7 @@ makeQualNamed n = makeQual n . makeNamed n
 makeOrigin :: GHC.Name -> Origin
 makeOrigin ghcName = case nameSrcSpan ghcName of
     RealSrcSpan ss ->
-        let path = FastString.unpackFS $ srcSpanFile ss
+        let path = unpackFS $ srcSpanFile ss
             loc0 = SrcLoc.realSrcSpanStart ss
             loc1 = SrcLoc.realSrcSpanEnd ss
         in KnownSource $ Source path $ SrcSpan (mkLoc loc0) (mkLoc loc1)

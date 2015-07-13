@@ -167,6 +167,12 @@ renderIfChanged d
 
 -- Declarations
 
+instance Render ModuleInterface where
+    doc iface = combine vcat
+        [ text' $ "Module: " ++ moduleName iface
+        ]
+
+
 instance Render ValueDecl where
     doc (ValueDecl t i) =
         doc i <#> prefixSig (doc t) <> doc line

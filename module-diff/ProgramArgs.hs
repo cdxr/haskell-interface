@@ -4,13 +4,16 @@ module ProgramArgs
   , ProgramArgs(..)
   , Flag
   , Task(..)
-  , Target
+  , ModuleTarget
+  , PackageTarget(..)
 )
 where
 
 import Data.Foldable
 
 import Options.Applicative
+
+import Data.Interface.Package ( PackageId(..) )
 
 
 parseProgramArgs :: IO ProgramArgs
@@ -39,12 +42,17 @@ defaultProgramArgs = ProgramArgs
     }
 
 
--- | A path or module name
-type Target = String
+data PackageTarget = PackageTarget FilePath PackageId
+    deriving (Show, Eq, Ord)
+
+-- | A module path or module name
+type ModuleTarget = String
 
 data Task
-    = PrintInterface Target
-    | CompareInterfaces Target Target
+    = PrintPackage PackageTarget
+--  | ComparePackages PackageTarget PackageTarget
+    | PrintModule ModuleTarget
+    | CompareModules ModuleTarget ModuleTarget
     | BuiltInTask String
     | RunTestModule FilePath
     deriving (Show, Eq, Ord)
@@ -74,9 +82,17 @@ flag_instances = switch $ mconcat
 
 parseTask :: Parser Task
 parseTask = subparser $ mconcat
-    [ command "show" $
+    [ command "show-package" $
+        info (helper <*> parsePrintPackageInterface) $
+            progDesc "Print a package interface summary"
+    , command "show" $
         info (helper <*> parsePrintInterface) $
             progDesc "Print an interface summary"
+    {-
+    , command "compare-packages" $
+        info (helper <*> parseComparePackageInterfaces) $
+            progDesc "Compare two package interfaces"
+    -}
     , command "compare" $
         info (helper <*> parseCompareInterfaces) $
             progDesc "Compare two module interfaces"
@@ -88,13 +104,32 @@ parseTask = subparser $ mconcat
             progDesc "Run a built-in task (development feature)"
     ]
 
+parsePackageTarget :: Parser PackageTarget
+parsePackageTarget =
+    PackageTarget
+        <$> argument str (metavar "PACKAGE-DB")
+        <*> fmap PackageId (argument str (metavar "PACKAGE-ID"))
+
+
+parsePrintPackageInterface :: Parser Task
+parsePrintPackageInterface = PrintPackage <$> parsePackageTarget
+
 parsePrintInterface :: Parser Task
-parsePrintInterface = PrintInterface <$> argument str (metavar "TARGET")
+parsePrintInterface = PrintModule <$> argument str (metavar "MODULE")
+
+{-
+parseComparePackageInterfaces :: Parser Task
+parseComparePackageInterfaces =
+    ComparePackages
+        <$> argument str (metavar "OLD-PACKAGE")
+        <*> argument str (metavar "NEW-PACKAGE")
+-}
 
 parseCompareInterfaces :: Parser Task
-parseCompareInterfaces = CompareInterfaces
-    <$> argument str (metavar "OLD-TARGET")
-    <*> argument str (metavar "NEW-TARGET")
+parseCompareInterfaces =
+    CompareModules
+        <$> argument str (metavar "OLD-MODULE")
+        <*> argument str (metavar "NEW-MODULE")
 
 parseRunTestModule :: Parser Task
 parseRunTestModule = RunTestModule <$> option str fields

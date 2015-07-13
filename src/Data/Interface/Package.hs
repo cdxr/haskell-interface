@@ -15,18 +15,21 @@ import Data.Interface.Module
 import Data.Interface.ModuleDiff
 
 
-data PackageInfo = PackageInfo
-    { pkgLicense    :: C.License
-    , pkgCopyright  :: String
-    , pkgMaintainer :: String
-    -- ... TODO etc
-    } deriving (Show, Eq)
+type ModuleEnv = Map ModuleName ModuleInterface
+
+singleModuleInterface :: ModuleInterface -> ModuleEnv
+singleModuleInterface iface = Map.singleton (moduleName iface) iface
+
+
+newtype PackageId = PackageId { packageIdString :: String }
+    deriving (Show, Eq, Ord)
+
 
 data PackageInterface = PackageInterface
-    { pkgId      :: C.PackageId
-    , pkgInfo    :: PackageInfo
-    , pkgModules :: Map ModuleName ModuleInterface
-    , pkgExposedModules :: [ModuleName]
+    { pkgId             :: PackageId
+    --, pkgInfo           :: PackageInfo
+    , pkgExposedModules :: ModuleEnv
+    , pkgHiddenModules  :: ModuleEnv
     } deriving (Show)
 
 {- PackageInterface notes:
@@ -38,16 +41,28 @@ data PackageInterface = PackageInterface
 
 
 data PackageDiff = PackageDiff
-    { diffPkgId             :: Change C.PackageId
-    , diffPkgInfo           :: Change PackageInfo
-    , diffPkgModules        :: MapDiff ModuleName ModuleDiff ModuleInterface
-    , diffPkgExposedModules :: Change [ModuleName]
+    { diffPkgId             :: Change PackageId
+    --, diffPkgInfo           :: Change PackageInfo
+    , diffPkgExposedModules :: MapDiff ModuleName ModuleDiff ModuleInterface
+    , diffPkgHiddenModules  :: MapDiff ModuleName ModuleDiff ModuleInterface
     }
 
 instance Diff PackageInterface PackageDiff where
     diff a b = PackageDiff
         { diffPkgId             = on diff pkgId a b
-        , diffPkgInfo           = on diff pkgInfo a b
-        , diffPkgModules        = on diff pkgModules a b
+        --, diffPkgInfo           = on diff pkgInfo a b
         , diffPkgExposedModules = on diff pkgExposedModules a b
+        , diffPkgHiddenModules  = on diff pkgHiddenModules a b
         }
+
+
+{-- TODO
+ - Should we include this information?
+data PackageInfo = PackageInfo
+    { pkgLicense    :: C.License
+    , pkgCopyright  :: String
+    , pkgMaintainer :: String
+    -- ... TODO etc
+    } deriving (Show, Eq)
+-}
+

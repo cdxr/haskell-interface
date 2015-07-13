@@ -8,7 +8,10 @@ import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
-import LoadModuleInterface   ( readInterface )
+import LoadModuleInterface ( ModuleGoal(..), guessGoal,
+                             withGhc, makeInterface )
+import LoadPackageInterface ( loadPackageDB, lookupPackageId,
+                              makePackageInterface )
 
 import Data.Interface
 import Data.Interface.Change
@@ -32,9 +35,11 @@ start = do
 
 runTask :: Task -> Main ()
 runTask task = case task of
-    PrintInterface t ->
+    PrintPackage t ->
+        printPackageInterface =<< loadPackage t
+    PrintModule t ->
         printModuleInterface =<< loadModule t
-    CompareInterfaces t0 t1 -> do
+    CompareModules t0 t1 -> do
         mdiff <- diff <$> loadModule t0 <*> loadModule t1
         printModuleDiff (t0, t1) mdiff
     BuiltInTask s -> case lookup s builtinTasks of
@@ -43,9 +48,17 @@ runTask task = case task of
     RunTestModule t -> runTestModule t
 
 
-loadModule :: Target -> Main ModuleInterface
+loadPackage :: PackageTarget -> Main PackageInterface
+loadPackage (PackageTarget dbPath pkgId) = liftIO $ do
+    mpc <- lookupPackageId pkgId <$> loadPackageDB dbPath
+    case mpc of
+        Nothing -> error $ "could not find package: " ++ packageIdString pkgId
+        Just pc -> makePackageInterface pc
+
+
+loadModule :: ModuleTarget -> Main ModuleInterface
 loadModule t = do
-    iface <- liftIO $ readInterface t
+    iface <- liftIO $ withGhc $ makeInterface =<< guessGoal t
 
     -- don't qualify names from this module
     unqualify $ moduleName iface  
@@ -55,6 +68,15 @@ loadModule t = do
         Nothing -> iface
         Just n -> filterInterfaceNames (/= n) iface
 
+
+printPackageInterface :: PackageInterface -> Main ()
+printPackageInterface iface = do
+    outputLine $ unlines
+        [ "\n*** Package: " ++ show (pkgId iface) ++ " ***\n"
+        , "Exposed modules:\n"
+        ]
+
+    mapM_ render (pkgExposedModules iface)
 
 printModuleInterface :: ModuleInterface -> Main ()
 printModuleInterface iface = do
@@ -70,12 +92,12 @@ printModuleInterface iface = do
     mapM_ render (compileModuleExports iface)
 
 
-printModuleDiff :: (Target, Target) -> ModuleDiff -> Main ()
+printModuleDiff :: (ModuleTarget, ModuleTarget) -> ModuleDiff -> Main ()
 printModuleDiff (t0, t1) mdiff = do
     outputLine $ unlines
         [ ""
         , "************************************"
-        , " Comparing Targets:"
+        , " Comparing Modules:"
         , "   " ++ t0
         , "   " ++ t1
         , "************************************"
@@ -88,7 +110,7 @@ printModuleDiff (t0, t1) mdiff = do
 -- "test modules". A test module is a module containing exports with names
 -- suffixed with "_0" and "_1", which are compared as if they originated in
 -- different module versions.
-runTestModule :: Target -> Main ()
+runTestModule :: ModuleTarget -> Main ()
 runTestModule t = do
     iface <- loadModule t
 

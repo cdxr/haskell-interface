@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:
     LoadModuleInterface
+    LoadPackageInterface
     Data.Interface
     Data.Interface.Name
     Data.Interface.Name.Map
@@ -30,12 +31,15 @@ library
     Data.Interface.Module.Decl
     Data.Interface.Module.Export
     Data.Interface.ModuleDiff
+    Data.Interface.Package
   -- other-modules:
   -- other-extensions:
   build-depends:
     base >=4.8 && <4.9,
     ghc >=7.10 && <7.11,
     ghc-paths >=0.1 && <0.2,
+    bin-package-db ==0.0.0.0,
+    Cabal >=1.22 && <1.23,
     transformers >=0.4,
     containers >=0.5 && <0.6,
     bifunctors >=5 && <6,
