@@ -8,10 +8,8 @@ import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
-import LoadModuleInterface ( ModuleGoal(..), guessGoal,
-                             withGhc, makeInterface )
-import LoadPackageInterface ( loadPackageDB, lookupPackageId,
-                              makePackageInterface )
+import LoadModuleInterface
+import LoadPackageInterface
 
 import Data.Interface
 import Data.Interface.Change
@@ -49,11 +47,13 @@ runTask task = case task of
 
 
 loadPackage :: PackageTarget -> Main PackageInterface
-loadPackage (PackageTarget dbPath pkgId) = liftIO $ do
-    mpc <- lookupPackageId pkgId <$> loadPackageDB dbPath
-    case mpc of
-        Nothing -> error $ "could not find package: " ++ packageIdString pkgId
-        Just pc -> makePackageInterface pc
+loadPackage (PackageTarget pid pkgDB) = do
+    ipids <- withPackageEnv $ \ penv -> do
+        _ <- setPackageDB pkgDB penv
+        lookupPackageId penv pid
+    case ipids of
+        [] -> error $ "could not find package: " ++ formatPackageId pid
+        pc:_ -> liftIO $ makePackageInterface pc
 
 
 loadModule :: ModuleTarget -> Main ModuleInterface
@@ -146,16 +146,21 @@ runTestModule t = do
                 | otherwise -> s
 
 
+type Env = (ProgramArgs, PackageEnv)
 
-newtype Main a = Main (ReaderT ProgramArgs (StateT QualContext IO) a)
+newtype Main a = Main (ReaderT Env (StateT QualContext IO) a)
     deriving (Functor, Applicative, Monad, MonadIO)
 
 runMain :: Main a -> ProgramArgs -> IO a
-runMain (Main m) args =
-    evalStateT (runReaderT m args) defQualContext
+runMain (Main m) args = do
+    e <- newPackageEnv
+    evalStateT (runReaderT m (args, e)) defQualContext
 
 getArg :: (ProgramArgs -> a) -> Main a
-getArg = Main . asks
+getArg f = Main $ asks (f . fst)
+
+withPackageEnv :: (PackageEnv -> IO a) -> Main a
+withPackageEnv f = liftIO . f =<< Main (asks snd)
 
 getQualContext :: Main QualContext
 getQualContext = Main (lift get)

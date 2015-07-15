@@ -1,12 +1,26 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Interface.Package where
+module Data.Interface.Package
+(
+    ModuleEnv
+  , singleModuleInterface
+
+  , PackageInterface(..)
+  , PackageDiff(..)
+
+  , PackageId
+  , PackageIdentifier
+  , formatPackageId
+  , parsePackageId
+)
+where
 
 import Data.Function ( on )
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
-import qualified Distribution.Package as C
+import Distribution.Text
+import Distribution.Package as C
 import qualified Distribution.License as C
 
 import Data.Interface.Name ( ModuleName )
@@ -21,8 +35,13 @@ singleModuleInterface :: ModuleInterface -> ModuleEnv
 singleModuleInterface iface = Map.singleton (moduleName iface) iface
 
 
-newtype PackageId = PackageId { packageIdString :: String }
-    deriving (Show, Eq, Ord)
+
+formatPackageId :: PackageId -> String
+formatPackageId = display
+
+parsePackageId :: String -> Maybe PackageId
+parsePackageId = simpleParse
+
 
 
 data PackageInterface = PackageInterface
@@ -41,7 +60,7 @@ data PackageInterface = PackageInterface
 
 
 data PackageDiff = PackageDiff
-    { diffPkgId             :: Change PackageId
+    { diffPkgId             :: Change C.PackageId
     --, diffPkgInfo           :: Change PackageInfo
     , diffPkgExposedModules :: MapDiff ModuleName ModuleDiff ModuleInterface
     , diffPkgHiddenModules  :: MapDiff ModuleName ModuleDiff ModuleInterface
@@ -65,4 +84,5 @@ data PackageInfo = PackageInfo
     -- ... TODO etc
     } deriving (Show, Eq)
 -}
+ 
 

@@ -1,6 +1,17 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module LoadModuleInterface where
+module LoadModuleInterface
+(
+    ModuleGoal(..)
+  , guessGoal
+  , withGhc
+  , makeInterface
+
+  , PkgKey
+  , pkgKeyToGHC
+  , pkgKeyFromCabal
+)
+where
 
 import Control.Monad
 import Control.Monad.Trans.State.Strict
@@ -18,7 +29,7 @@ import qualified Name
 import qualified Module
 import Digraph ( flattenSCCs )
 import HscTypes ( isBootSummary )
-import FastString ( FastString, unpackFS, mkFastString )
+import FastString ( FastString, unpackFS )
 import UniqSet
 import qualified ConLike
 import qualified PatSyn
@@ -30,16 +41,30 @@ import qualified TyCon
 import qualified Type
 import qualified Kind
 
+import qualified Distribution.Text as Cabal
+import qualified Distribution.Package as Cabal
+
 import Data.Interface as Interface
 import Data.Interface.Type.Build as Build
+
+
+-- | A package key stored in the same format as a GHC.PackageKey
+newtype PkgKey = PkgKey String
+    deriving (Show, Eq, Ord)
+
+pkgKeyToGHC :: PkgKey -> GHC.PackageKey
+pkgKeyToGHC (PkgKey s) = Module.stringToPackageKey s
+
+pkgKeyFromCabal :: Cabal.PackageKey -> PkgKey
+pkgKeyFromCabal = PkgKey . Cabal.display
 
 
 -- | The module target; either a source module that needs to be compiled,
 -- or the name of a module that is installed or has a local source.
 data ModuleGoal
-    = SourceGoal GHC.TargetId
+    = SourceGoal GHC.TargetId   -- TODO: change to `Either ModuleName FilePath`
         -- ^ a GHC compilation target
-    | ModuleGoal GHC.ModuleName (Maybe GHC.PackageKey)
+    | ModuleGoal Interface.ModuleName (Maybe PkgKey)
         -- ^ name and optional `PackageKey`; when @Nothing@ the module might
         -- be a compilation target
     deriving (Eq)
@@ -52,7 +77,7 @@ guessGoal :: String -> Ghc ModuleGoal
 guessGoal s = do
     Target tid _ _ <- guessTarget s Nothing
     pure $ case tid of
-        TargetModule modName -> ModuleGoal modName Nothing
+        TargetModule n -> ModuleGoal (moduleNameString n) Nothing
         _ -> SourceGoal tid
 
 instance Show ModuleGoal where
@@ -61,8 +86,9 @@ instance Show ModuleGoal where
             showString "SourceGoal<" . showTargetId t . showChar '>'
         ModuleGoal modName mPkgKey ->
             showString "ModuleGoal<" .
-            showModName modName .
-            shows (fmap Module.packageKeyFS mPkgKey) .
+            shows modName  .
+            showChar ' ' .
+            shows mPkgKey .
             showChar '>'
       where
         showTargetId t = case t of
@@ -97,39 +123,18 @@ makeInterface (ModuleGoal modIface =
 -- `PackageKey`. Without an explicitly given package, this will use
 -- source modules found in the local path.
 --
-packageModuleInterface ::
-    GHC.ModuleName -> Maybe GHC.PackageKey -> Ghc ModuleInterface
+packageModuleInterface ::  -- XXX TODO add package database as paramter
+    Interface.ModuleName -> Maybe PkgKey -> Ghc ModuleInterface
 packageModuleInterface modName mPkgKey = do
-    ghcModule <- GHC.lookupModule modName (fmap Module.packageKeyFS mPkgKey)
+    ghcModule <- GHC.lookupModule (mkModuleName modName) (fmap keyFS mPkgKey)
     may <- getModuleInfo ghcModule
     case may of
         Nothing ->
-            error $ "packageModuleInterface: failed to load module "
-                 ++ GHC.moduleNameString modName
+            error $ "packageModuleInterface: failed to load module " ++ modName
         Just modInfo -> runLoadMod $ makeModuleInfoInterface ghcModule modInfo
-
-
-{-
-        dynFlags <- getSessionDynFlags
-
-        -- these flags are necessary to use 'setContext'
-        _ <- setSessionDynFlags $ dynFlags
-            { ghcMode = CompManager
-            , hscTarget = HscInterpreted
-            , ghcLink = LinkInMemory
-            }
-
-        setContext [ IIModule $ mkModuleName "Test"
-                   , IIDecl $ simpleImportDecl modName
-                   ]
--}
-
-{-
-        case lookupModuleInAllPackages dynFlags modName of
-            [] -> Nothing
-            (m, pkgConfig) : _ -> Just $
--}
-            
+  where
+    keyFS :: PkgKey -> FastString
+    keyFS = Module.packageKeyFS . pkgKeyToGHC
 
 
 -- | Produce a `ModuleInterface` for each compilation target in

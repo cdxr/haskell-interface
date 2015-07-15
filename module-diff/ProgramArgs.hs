@@ -9,11 +9,9 @@ module ProgramArgs
 )
 where
 
-import Data.Foldable
-
 import Options.Applicative
 
-import Data.Interface.Package ( PackageId(..) )
+import LoadPackageInterface
 
 
 parseProgramArgs :: IO ProgramArgs
@@ -42,7 +40,7 @@ defaultProgramArgs = ProgramArgs
     }
 
 
-data PackageTarget = PackageTarget FilePath PackageId
+data PackageTarget = PackageTarget PackageId PackageDB
     deriving (Show, Eq, Ord)
 
 -- | A module path or module name
@@ -107,9 +105,17 @@ parseTask = subparser $ mconcat
 parsePackageTarget :: Parser PackageTarget
 parsePackageTarget =
     PackageTarget
-        <$> argument str (metavar "PACKAGE-DB")
-        <*> fmap PackageId (argument str (metavar "PACKAGE-ID"))
+        <$> argument pkgId (metavar "PACKAGE-ID")
+        <*> ( argument pkgDB (metavar "PACKAGE-DB")
+              <|> pure UserPackageDB)
+pkgDB :: ReadM PackageDB
+pkgDB = SpecificPackageDB <$> str
 
+pkgId :: ReadM PackageId
+pkgId = eitherReader $ \s ->
+    case parsePackageId s of
+        Nothing -> Left "Not a valid package id"
+        Just a  -> Right a
 
 parsePrintPackageInterface :: Parser Task
 parsePrintPackageInterface = PrintPackage <$> parsePackageTarget

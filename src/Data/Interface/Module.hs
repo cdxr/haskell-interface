@@ -4,6 +4,7 @@ module Data.Interface.Module
  (
 -- * ModuleInterface
     ModuleInterface(..)
+  , ModuleName
   , ExportName
   , ClassInstance(..)
   , makeModuleInterface
