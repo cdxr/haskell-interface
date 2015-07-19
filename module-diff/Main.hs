@@ -47,13 +47,12 @@ runTask task = case task of
 
 
 loadPackage :: PackageTarget -> Main PackageInterface
-loadPackage (PackageTarget pid pkgDB) = do
-    ipids <- withPackageEnv $ \ penv -> do
-        _ <- setPackageDB pkgDB penv
-        lookupPackageId penv pid
-    case ipids of
-        [] -> error $ "could not find package: " ++ formatPackageId pid
-        pc:_ -> liftIO $ makePackageInterface pc
+loadPackage (PackageTarget pkgFilter dbs) = do
+    liftIO $ print pkgFilter
+    lps <- withPackageEnv $ \env -> packageLocations env pkgFilter dbs
+    case lps of
+        [] -> error $ "could not find package: " ++ showPackageFilter pkgFilter
+        lp:_ -> liftIO $ makePackageInterface lp
 
 
 loadModule :: ModuleTarget -> Main ModuleInterface
@@ -72,8 +71,9 @@ loadModule t = do
 printPackageInterface :: PackageInterface -> Main ()
 printPackageInterface iface = do
     outputLine $ unlines
-        [ "\n*** Package: " ++ show (pkgId iface) ++ " ***\n"
-        , "Exposed modules:\n"
+        [ "\n*** Package: ***\n"
+        , show (pkgId iface)
+        , "\nExposed modules:"
         ]
 
     mapM_ render (pkgExposedModules iface)

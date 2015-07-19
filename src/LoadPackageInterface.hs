@@ -4,9 +4,16 @@ module LoadPackageInterface
 
   , PackageEnv
   , newPackageEnv
-  , setPackageDB
+  , resetPackageDB
   , getPackageIndex
-  , lookupPackageId
+
+  , PackageFilter(..)
+  , readPackageFilter
+  , showPackageFilter
+  , filterPackages
+
+  , LocPackage(..)
+  , packageLocations 
 
   -- * Cabal
   , PackageDB(..)
@@ -16,12 +23,22 @@ module LoadPackageInterface
 where
 
 import Data.IORef
+import Data.Maybe ( maybeToList )
+import Data.Map ( Map )
+import qualified Data.Map as Map
+
+import Control.Monad.IO.Class
 
 import GHC
+import DynFlags
+import qualified Outputable as Out
+import qualified Packages as GHC
+import qualified PackageConfig as GHC
 
+import Distribution.Text as Cabal
 import Distribution.Package as Cabal
 
-import Distribution.Simple.PackageIndex ( InstalledPackageIndex, )
+import Distribution.Simple.PackageIndex ( InstalledPackageIndex )
 import qualified Distribution.Simple.PackageIndex as Cabal
 import qualified Distribution.ModuleName as Cabal
 
@@ -43,48 +60,132 @@ import Data.Interface.Package as Interface
 
 data PackageEnv = PackageEnv
     { programDB    :: Cabal.ProgramDb
-    , packageDBVar :: IORef (Maybe PackageDB, InstalledPackageIndex)
+    , packageDBRef :: IORef (Map PackageDB InstalledPackageIndex)
     }
 
 newPackageEnv :: IO PackageEnv
 newPackageEnv = do
     progs <- configureAllKnownPrograms normal defaultProgramDb
-    PackageEnv progs <$> newIORef (Nothing, Cabal.fromList [])
+    PackageEnv progs <$> newIORef Map.empty
 
--- TODO: avoid additional work when this PackageDB is already loaded
-setPackageDB :: PackageDB -> PackageEnv -> IO InstalledPackageIndex
-setPackageDB db penv = do
-    pix <- getPackageDBContents verbose db (programDB penv)
-    atomicWriteIORef (packageDBVar penv) (Just db, pix)
-    return pix
+resetPackageDB :: PackageEnv -> PackageDB -> IO ()
+resetPackageDB env pdb =
+    modifyIORef (packageDBRef env) $ Map.delete pdb
 
--- getPackageDB :: PackageEnv -> IO PackageDB
+getPackageIndex :: PackageEnv -> PackageDB -> IO InstalledPackageIndex
+getPackageIndex env pdb = do
+    m <- readIORef (packageDBRef env)
+    case Map.lookup pdb m of
+        Just ipi -> pure ipi
+        Nothing -> do
+            ipi <- getPackageDBContents silent pdb (programDB env)
+            atomicWriteIORef (packageDBRef env) $ Map.insert pdb ipi m
+            pure ipi
 
-getPackageIndex :: PackageEnv -> IO InstalledPackageIndex 
-getPackageIndex penv = snd <$> readIORef (packageDBVar penv)
+
+data PackageFilter
+    = MatchName PackageName
+    | MatchId PackageId
+    | MatchInstalledId InstalledPackageId
+    deriving (Show, Eq, Ord)
+
+readPackageFilter :: String -> PackageFilter
+readPackageFilter s
+    | '-' `elem` s, Just pid <- parsePackageId s =
+        MatchId pid
+    | otherwise =
+        MatchName $ PackageName s
+
+showPackageFilter :: PackageFilter -> String
+showPackageFilter pf = case pf of
+    MatchName n -> Cabal.display n
+    MatchId pid -> Cabal.display pid
+    MatchInstalledId ipid -> Cabal.display ipid
 
 
-lookupPackageId :: PackageEnv -> PackageId -> IO [InstalledPackageInfo]
-lookupPackageId penv pid = do
-    pkgIndex <- getPackageIndex penv
-    pure $ Cabal.lookupSourcePackageId pkgIndex pid
+filterPackages ::
+    PackageFilter -> InstalledPackageIndex -> [InstalledPackageInfo]
+filterPackages pf pix = case pf of
+    MatchName n -> concatMap snd $ Cabal.lookupPackageName pix n
+    MatchId pid -> Cabal.lookupSourcePackageId pix pid 
+    MatchInstalledId ipid ->
+        maybeToList $ Cabal.lookupInstalledPackageId pix ipid
 
---lookupPackageKey :: PackageEnv -> PackageKey -> IO InstalledPackageInfo
+
+-- | A package annotated with the `PackageDB` where it is located.
+data LocPackage = LocPackage PackageDB InstalledPackageInfo
+    deriving (Show)
+
+packageLocations ::
+    PackageEnv ->
+    PackageFilter ->
+    [PackageDB] ->
+    IO [LocPackage]
+packageLocations env pf = fmap concat . mapM list
+  where
+    list :: PackageDB -> IO [LocPackage]
+    list db = do
+        pix <- getPackageIndex env db 
+        pure [ LocPackage db pkg | pkg <- filterPackages pf pix ]
 
 
 makeModuleName :: Cabal.ModuleName -> Interface.ModuleName
 makeModuleName = intercalate "." . components
 
-makePackageInterface :: InstalledPackageInfo -> IO PackageInterface
-makePackageInterface ipi = withGhc $ do
-    let pkgKey = packageKey ipi
-    exposed <- makeModuleEnv pkgKey $ map exposedName (exposedModules ipi)
-    hidden  <- makeModuleEnv pkgKey $ hiddenModules ipi
-    pure $ PackageInterface
-        { pkgId             = sourcePackageId ipi
-        , pkgExposedModules = exposed
-        , pkgHiddenModules  = hidden
-        }
+makePackageInterface :: LocPackage -> IO PackageInterface
+makePackageInterface lp@(LocPackage db ipi) = do
+    mapM_ (print . exposedName) (exposedModules ipi)
+    withGhc $ do
+        ghcLocPackage lp
+
+        let pkgKey = packageKey ipi
+        exposed <- makeModuleEnv pkgKey $ map exposedName (exposedModules ipi)
+        hidden  <- makeModuleEnv pkgKey $ hiddenModules ipi
+        pure $ PackageInterface
+            { pkgId             = sourcePackageId ipi
+            , pkgExposedModules = exposed
+            , pkgHiddenModules  = hidden
+            }
+
+ghcLocPackage :: LocPackage -> Ghc ()
+ghcLocPackage (LocPackage db ipi) = do
+    dflags0 <- getSessionDynFlags
+    _ <- setSessionDynFlags $ dflags0
+            { extraPkgConfs = (toPkgConfRef db :)
+            , packageFlags = [ ExposePackage (pkgKeyArg ipi) modRenaming ]
+            }
+    _ <- liftIO $ GHC.initPackages dflags0
+        -- ignored value: ^ do we need to set the session flags again?
+
+    debugPackageFlags
+    
+    return ()
+  where
+    toPkgConfRef :: PackageDB -> PkgConfRef
+    toPkgConfRef db = case db of
+        GlobalPackageDB      -> GlobalPkgConf
+        UserPackageDB        -> UserPkgConf
+        SpecificPackageDB fp -> PkgConfFile fp
+
+    pkgKeyArg :: InstalledPackageInfo -> PackageArg
+    pkgKeyArg = PackageKeyArg . Cabal.display . packageKey
+
+    modRenaming = ModRenaming False []  -- TODO
+
+
+debugPackageFlags :: Ghc ()
+debugPackageFlags = do
+    dynFlags <- getSessionDynFlags
+    let output s f = putStrLn $ "  " ++ s ++ ": " ++ show (f dynFlags)
+    liftIO $ do
+        putStrLn "debugPackageFlags:"
+        output "packageFlags" packageFlags
+        output "pkgDatabase" $
+            (fmap.map) (showInstalledPkgInfo dynFlags) . pkgDatabase
+  where
+    showInstalledPkgInfo dfs =
+        Out.showSDoc dfs . Out.ppr . GHC.installedPackageId
+
 
 makeModuleEnv :: Cabal.PackageKey -> [Cabal.ModuleName] -> Ghc ModuleEnv
 makeModuleEnv k =
@@ -94,38 +195,6 @@ makeModuleEnv k =
     loadInterface modName =
         makeInterface $ ModuleGoal (makeModuleName modName)
                                    (Just $ pkgKeyFromCabal k)
-
-
-{- TODO:
-data PackageGoal
-    = IdGoal PackageId
-    | InstalledIdGoal InstalledPackageId
-    deriving (Show, Eq, Ord)
--}
-
-{-
-parsePackageId :: String -> Maybe PackageId
-parsePackageId = Cabal.simpleParse
-
--- | Construct an interface for the package with the given `PackageId`. If
--- there are multiple matching packages, one of them is selected arbitrarily.
-packageIdInterface ::
-    PackageId -> InstalledPackageIndex -> IO (Maybe PackageInterface)
-packageIdInterface pid ipix =
-    case lookupSourcePackageId ipix pid of
-        [] -> pure Nothing
-        (ipi:_) -> Just <$> makePackageInterface ipi
-
-
-loadPackageInterface ::
-    Cabal.InstalledPackageId ->
-    InstalledPackageIndex ->
-    IO (Maybe PackageInterface)
-loadPackageInterface ipid ipix =
-    case lookupInstalledPackageId ipix ipid of
-        Nothing -> pure Nothing
-        Just ipi -> Just <$> makePackageInterface ipi
--}
 
 
 {-

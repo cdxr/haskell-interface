@@ -43,7 +43,6 @@ parsePackageId :: String -> Maybe PackageId
 parsePackageId = simpleParse
 
 
-
 data PackageInterface = PackageInterface
     { pkgId             :: PackageId
     --, pkgInfo           :: PackageInfo
@@ -81,7 +80,7 @@ data PackageInfo = PackageInfo
     { pkgLicense    :: C.License
     , pkgCopyright  :: String
     , pkgMaintainer :: String
-    -- ... TODO etc
+    -- ... etc
     } deriving (Show, Eq)
 -}
  

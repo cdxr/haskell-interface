@@ -16,6 +16,7 @@ where
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
+import Control.Monad.IO.Class
 
 import qualified Data.Map as Map
 
@@ -47,6 +48,8 @@ import qualified Distribution.Package as Cabal
 import Data.Interface as Interface
 import Data.Interface.Type.Build as Build
 
+import Debug.Trace
+
 
 -- | A package key stored in the same format as a GHC.PackageKey
 newtype PkgKey = PkgKey String
@@ -68,6 +71,7 @@ data ModuleGoal
         -- ^ name and optional `PackageKey`; when @Nothing@ the module might
         -- be a compilation target
     deriving (Eq)
+
 
 -- | Guess the intended `ModuleGoal` from a `String`. When given a path to a source
 -- file, it will be compiled to produce the interface. When given the name of
@@ -123,12 +127,18 @@ makeInterface (ModuleGoal modIface =
 -- `PackageKey`. Without an explicitly given package, this will use
 -- source modules found in the local path.
 --
-packageModuleInterface ::  -- XXX TODO add package database as paramter
+packageModuleInterface ::
     Interface.ModuleName -> Maybe PkgKey -> Ghc ModuleInterface
 packageModuleInterface modName mPkgKey = do
+    {- Note: Including the package key results in a failure to find module.
+         Why doesn't this work?
     ghcModule <- GHC.lookupModule (mkModuleName modName) (fmap keyFS mPkgKey)
-    may <- getModuleInfo ghcModule
-    case may of
+    -}
+
+    ghcModule <- GHC.lookupModule (mkModuleName modName) Nothing -- XXX
+
+    m <- getModuleInfo ghcModule
+    case m of
         Nothing ->
             error $ "packageModuleInterface: failed to load module " ++ modName
         Just modInfo -> runLoadMod $ makeModuleInfoInterface ghcModule modInfo
