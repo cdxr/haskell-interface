@@ -134,7 +134,6 @@ makeModuleName = intercalate "." . components
 
 makePackageInterface :: LocPackage -> IO PackageInterface
 makePackageInterface lp@(LocPackage db ipi) = do
-    mapM_ (print . exposedName) (exposedModules ipi)
     withGhc $ do
         ghcLocPackage lp
 
@@ -157,8 +156,6 @@ ghcLocPackage (LocPackage db ipi) = do
     _ <- liftIO $ GHC.initPackages dflags0
         -- ignored value: ^ do we need to set the session flags again?
 
-    debugPackageFlags
-    
     return ()
   where
     toPkgConfRef :: PackageDB -> PkgConfRef

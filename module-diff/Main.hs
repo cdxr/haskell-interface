@@ -68,7 +68,7 @@ printPackageInterface :: PackageInterface -> Main ()
 printPackageInterface iface = do
     outputLine $ unlines
         [ "\n*** Package: ***\n"
-        , show (pkgId iface)
+        , formatPackageId (pkgId iface)
         , "\nExposed modules:"
         ]
 
