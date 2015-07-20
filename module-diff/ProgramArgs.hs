@@ -17,12 +17,10 @@ import LoadPackageInterface
 
 parseProgramArgs :: IO ProgramArgs
 parseProgramArgs =
-    execParser $
-         info (helper <*> mainParser <|> pure defaultProgramArgs) $
-            mconcat
-                [ fullDesc
-                , header "module-diff: view and compare module interfaces"
-                ]
+    execParser $ info (helper <*> mainParser) $ mconcat
+        [ fullDesc
+        , header "module-diff: view and compare module interfaces"
+        ]
 
 type Flag = Bool
 
@@ -31,14 +29,6 @@ data ProgramArgs = ProgramArgs
     , outputClassInstances :: Flag      -- internal
     , programTask :: Task
     } deriving (Show, Eq, Ord)
-
--- | The arguments used when the program is run with no arguments
-defaultProgramArgs :: ProgramArgs
-defaultProgramArgs = ProgramArgs
-    { hideString = Nothing
-    , outputClassInstances = False
-    , programTask = BuiltInTask "test"
-    }
 
 
 data PackageTarget = PackageTarget PackageFilter [PackageDB]
@@ -52,8 +42,7 @@ data Task
 --  | ComparePackages PackageTarget PackageTarget
     | PrintModule ModuleTarget
     | CompareModules ModuleTarget ModuleTarget
-    | BuiltInTask String
-    | RunTestModule FilePath
+--  | RunTestModule FilePath
     deriving (Show, Eq, Ord)
 
 
@@ -86,21 +75,20 @@ parseTask = subparser $ mconcat
             progDesc "Print a package interface summary"
     , command "show" $
         info (helper <*> parsePrintInterface) $
-            progDesc "Print an interface summary"
+            progDesc "Print a module interface summary"
     {-
     , command "compare-packages" $
         info (helper <*> parseComparePackageInterfaces) $
             progDesc "Compare two package interfaces"
     -}
     , command "compare" $
-        info (helper <*> parseCompareInterfaces) $
+        info (helper <*> parseCompareModules) $
             progDesc "Compare two module interfaces"
+    {-
     , command "test" $
         info (helper <*> parseRunTestModule) $
             progDesc "Run a \"test\" module"
-    , command "builtin" $
-        info (helper <*> parseBuiltinTask) $
-            progDesc "Run a built-in task (development feature)"
+    -}
     ]
 
 parsePackageTarget :: Parser PackageTarget
@@ -133,22 +121,17 @@ parseComparePackageInterfaces =
         <*> argument str (metavar "NEW-PACKAGE")
 -}
 
-parseCompareInterfaces :: Parser Task
-parseCompareInterfaces =
+parseCompareModules :: Parser Task
+parseCompareModules =
     CompareModules
         <$> argument str (metavar "OLD-MODULE")
         <*> argument str (metavar "NEW-MODULE")
 
+{-
 parseRunTestModule :: Parser Task
 parseRunTestModule = RunTestModule <$> option str fields
   where
     fields = long "test"
           <> short 't'
           <> metavar "TEST-TARGET"
-
-parseBuiltinTask :: Parser Task
-parseBuiltinTask = BuiltInTask <$> option str fields
-  where
-    fields = long "built-in"
-          <> short 'b'
-          <> metavar "TASK-ID"
+-}
