@@ -1,48 +1,44 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
 module Main where
 
-import Control.Monad
-import Control.Monad.Trans.Reader
-import Control.Monad.Trans.State
-import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
 import LoadModuleInterface
 import LoadPackageInterface
 
 import Data.Interface
-import Data.Interface.Change
 
+import Task
+import Program
 import ProgramArgs
-import Render ( Render(..), renderStdout )
+import Html
+
+import qualified Console
 
 
 main :: IO ()
-main = runMain start =<< parseProgramArgs
+main = runProgram start =<< parseProgramArgs
 
 
-start :: Main ()
+start :: Program ()
 start = do
     whenFlag_ outputClassInstances $
         error "--instances: unimplemented"
 
-    runTask =<< getArg programTask
+    format <- getArg outputFormat
+    output format =<< loadTask =<< getArg programTask
 
 
-runTask :: Task -> Main ()
-runTask task = case task of
-    PrintPackage t ->
-        printPackageInterface =<< loadPackage t
-    PrintModule t ->
-        printModuleInterface =<< loadModule t
-    CompareModules t0 t1 -> do
-        mdiff <- diff <$> loadModule t0 <*> loadModule t1
-        printModuleDiff (t0, t1) mdiff
-    --RunTestModule t -> runTestModule t
+output :: OutputFormat -> LoadedTask -> Program ()
+output f = case f of
+    OutputConsole -> Console.runTask
+    OutputHtml -> Html.runTask
 
 
-loadPackage :: PackageTarget -> Main PackageInterface
+loadTask :: TargetTask -> Program LoadedTask
+loadTask = bitraverseTask loadPackage $ \mt -> (,) mt <$> loadModule mt
+
+
+loadPackage :: PackageTarget -> Program PackageInterface
 loadPackage (PackageTarget pkgFilter dbs) = do
     liftIO $ print pkgFilter
     lps <- withPackageEnv $ \env -> packageLocations env pkgFilter dbs
@@ -51,7 +47,7 @@ loadPackage (PackageTarget pkgFilter dbs) = do
         lp:_ -> liftIO $ makePackageInterface lp
 
 
-loadModule :: ModuleTarget -> Main ModuleInterface
+loadModule :: ModuleTarget -> Program ModuleInterface
 loadModule t = do
     iface <- liftIO $ withGhc $ makeInterface =<< guessGoal t
 
@@ -64,96 +60,14 @@ loadModule t = do
         Just n -> filterInterfaceNames (/= n) iface
 
 
-printPackageInterface :: PackageInterface -> Main ()
-printPackageInterface iface = do
-    outputLine $ unlines
-        [ "\n*** Package: ***\n"
-        , formatPackageId (pkgId iface)
-        , "\nExposed modules:"
-        ]
-
-    mapM_ render (pkgExposedModules iface)
-
-printModuleInterface :: ModuleInterface -> Main ()
-printModuleInterface iface = do
-    outputLine $ unlines
-        [ "\n*** Module: " ++ moduleName iface ++ " ***\n"
-        , "Exposed type constructors:\n"
-        ]
-
-    mapM_ render (moduleTypeCons iface)
-
-    outputLine "Module exports:\n"
-
-    mapM_ render (compileModuleExports iface)
-
-
-printModuleDiff :: (ModuleTarget, ModuleTarget) -> ModuleDiff -> Main ()
-printModuleDiff (t0, t1) mdiff = do
-    outputLine $ unlines
-        [ ""
-        , "************************************"
-        , " Comparing Modules:"
-        , "   " ++ t0
-        , "   " ++ t1
-        , "************************************"
-        ]
-
-    mapM_ render (diffModuleExports mdiff)
-
-
-type Env = (ProgramArgs, PackageEnv)
-
-newtype Main a = Main (ReaderT Env (StateT QualContext IO) a)
-    deriving (Functor, Applicative, Monad, MonadIO)
-
-runMain :: Main a -> ProgramArgs -> IO a
-runMain (Main m) args = do
-    e <- newPackageEnv
-    evalStateT (runReaderT m (args, e)) defQualContext
-
-getArg :: (ProgramArgs -> a) -> Main a
-getArg f = Main $ asks (f . fst)
-
-withPackageEnv :: (PackageEnv -> IO a) -> Main a
-withPackageEnv f = liftIO . f =<< Main (asks snd)
-
-getQualContext :: Main QualContext
-getQualContext = Main (lift get)
-
-unqualify :: ModuleName -> Main ()
-unqualify = Main . lift . modify . unqualifyModule
-
-whenFlag :: (ProgramArgs -> Flag) -> Main a -> Main (Maybe a)
-whenFlag f m = do
-    b <- getArg f
-    if b then Just <$> m else pure Nothing
-
-whenFlag_ :: (ProgramArgs -> Flag) -> Main () -> Main ()
-whenFlag_ f m = do
-    b <- getArg f
-    when b m
-
-
-outputLine :: String -> Main ()
-outputLine = liftIO . putStrLn
-
-
-render :: (Render a) => a -> Main ()
-render a = do
-    qc <- getQualContext
-    liftIO $ renderStdout 2 qc a
-    outputLine ""
-
-
-
 -- Incomplete "internal" features:
 
+{-
 -- | This function is horribly inefficient, but is only used for processing
 -- "test modules". A test module is a module containing exports with names
 -- suffixed with "_0" and "_1", which are compared as if they originated in
 -- different module versions.
-runTestModule :: ModuleTarget -> Main ()
+runTestModule :: ModuleTarget -> Program ()
 runTestModule t = do
     iface <- loadModule t
 
@@ -187,3 +101,4 @@ runTestModule t = do
             (pref, suf)
                 | suf == suffix -> pref
                 | otherwise -> s
+-}

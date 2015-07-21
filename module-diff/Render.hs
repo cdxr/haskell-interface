@@ -61,6 +61,14 @@ infixr 5 </>,<//>,<#>
 infixr 6 <+>
 
 
+renderToString :: (Render a) => Indent -> QualContext -> a -> String
+renderToString i qc = ($ "") . renders i qc
+
+renders :: (Render a) => Indent -> QualContext -> a -> ShowS
+renders i qc a =
+    displayS $ renderPretty 0.8 78 $
+        indent i $ unRDoc qc $ doc a
+
 renderStdout :: (Render a) => Indent -> QualContext -> a -> IO ()
 renderStdout i qc a =
     displayIO stdout $ renderPretty 0.8 78 $

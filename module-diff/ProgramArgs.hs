@@ -3,9 +3,7 @@ module ProgramArgs
     parseProgramArgs
   , ProgramArgs(..)
   , Flag
-  , Task(..)
-  , ModuleTarget
-  , PackageTarget(..)
+  , OutputFormat(..)
 )
 where
 
@@ -13,6 +11,8 @@ import Data.Foldable
 import Options.Applicative
 
 import LoadPackageInterface
+
+import Task
 
 
 parseProgramArgs :: IO ProgramArgs
@@ -27,22 +27,15 @@ type Flag = Bool
 data ProgramArgs = ProgramArgs
     { hideString :: Maybe String        -- internal
     , outputClassInstances :: Flag      -- internal
-    , programTask :: Task
+    , outputFormat :: OutputFormat
+    , outputFile :: Maybe FilePath
+    , programTask :: TargetTask
     } deriving (Show, Eq, Ord)
 
 
-data PackageTarget = PackageTarget PackageFilter [PackageDB]
-    deriving (Show, Eq, Ord)
-
--- | A module path or module name
-type ModuleTarget = String
-
-data Task
-    = PrintPackage PackageTarget
---  | ComparePackages PackageTarget PackageTarget
-    | PrintModule ModuleTarget
-    | CompareModules ModuleTarget ModuleTarget
---  | RunTestModule FilePath
+data OutputFormat
+    = OutputConsole
+    | OutputHtml
     deriving (Show, Eq, Ord)
 
 
@@ -51,6 +44,8 @@ mainParser =
   ProgramArgs
     <$> optional opt_hide
     <*> flag_instances
+    <*> parseFormat
+    <*> parseFile
     <*> parseTask
 
 opt_hide :: Parser String
@@ -68,13 +63,13 @@ flag_instances = switch $ mconcat
     , internal
     ]
 
-parseTask :: Parser Task
+parseTask :: Parser TargetTask
 parseTask = subparser $ mconcat
     [ command "show-package" $
         info (helper <*> parsePrintPackageInterface) $
             progDesc "Print a package interface summary"
     , command "show" $
-        info (helper <*> parsePrintInterface) $
+        info (helper <*> parsePrintModule) $
             progDesc "Print a module interface summary"
     {-
     , command "compare-packages" $
@@ -107,11 +102,26 @@ pkgDB = SpecificPackageDB <$> str
 packageFilter :: ReadM PackageFilter
 packageFilter = readPackageFilter <$> str
 
-parsePrintPackageInterface :: Parser Task
+parsePrintPackageInterface :: Parser (Task PackageTarget m)
 parsePrintPackageInterface = PrintPackage <$> parsePackageTarget
 
-parsePrintInterface :: Parser Task
-parsePrintInterface = PrintModule <$> argument str (metavar "MODULE")
+parsePrintModule :: Parser (Task p ModuleTarget)
+parsePrintModule = PrintModule <$> argument str (metavar "MODULE")
+
+parseFormat :: Parser OutputFormat
+parseFormat = flag OutputConsole OutputHtml $ mconcat
+    [ long "html"
+    , help "Output as HTML"
+    ]
+
+parseFile :: Parser (Maybe FilePath)
+parseFile = option (Just <$> str) $ mconcat
+    [ short 'o'
+    , help "Output file"
+    , metavar "FILE"
+    , value Nothing
+    ]
+
 
 {-
 parseComparePackageInterfaces :: Parser Task
@@ -121,7 +131,7 @@ parseComparePackageInterfaces =
         <*> argument str (metavar "NEW-PACKAGE")
 -}
 
-parseCompareModules :: Parser Task
+parseCompareModules :: Parser (Task p ModuleTarget)
 parseCompareModules =
     CompareModules
         <$> argument str (metavar "OLD-MODULE")

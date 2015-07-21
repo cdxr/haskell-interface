@@ -6,11 +6,11 @@ module Data.Interface.Package
   , singleModuleInterface
 
   , PackageInterface(..)
+  , showPackageId
   , PackageDiff(..)
 
   , PackageId
   , PackageIdentifier
-  , formatPackageId
   , parsePackageId
 )
 where
@@ -35,14 +35,6 @@ singleModuleInterface :: ModuleInterface -> ModuleEnv
 singleModuleInterface iface = Map.singleton (moduleName iface) iface
 
 
-
-formatPackageId :: PackageId -> String
-formatPackageId = display
-
-parsePackageId :: String -> Maybe PackageId
-parsePackageId = simpleParse
-
-
 data PackageInterface = PackageInterface
     { pkgId             :: PackageId
     --, pkgInfo           :: PackageInfo
@@ -56,6 +48,9 @@ data PackageInterface = PackageInterface
      - Hidden modules must be included in the map because their exports can be
        visible in exposed modules.
 -}
+
+showPackageId :: PackageInterface -> String
+showPackageId = display . pkgId
 
 
 data PackageDiff = PackageDiff
@@ -72,6 +67,18 @@ instance Diff PackageInterface PackageDiff where
         , diffPkgExposedModules = on diff pkgExposedModules a b
         , diffPkgHiddenModules  = on diff pkgHiddenModules a b
         }
+
+    toChange d =
+        PackageInterface
+            <$> toChange (diffPkgId d)
+            <*> toChange (diffPkgExposedModules d)
+            <*> toChange (diffPkgHiddenModules d)
+
+
+
+parsePackageId :: String -> Maybe PackageId
+parsePackageId = simpleParse
+
 
 
 {-- TODO
