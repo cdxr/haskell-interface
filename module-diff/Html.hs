@@ -2,7 +2,6 @@
 
 module Html where
 
-import Control.Arrow ( (&&&) )
 import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
@@ -31,7 +30,7 @@ runTask :: LoadedTask -> Program ()
 runTask t = do
     let html = case t of
             PrintPackage p -> renderPackagePage p
-            -- PrintModule m -> renderModulePage m
+            PrintModule (tgt,m) -> renderModulePage tgt m
             _ -> error "Html.runTask unimplemented for this target type"
 
     mfp <- getArg outputFile
@@ -50,29 +49,70 @@ writePackageHtml :: FilePath -> PackageInterface -> Program ()
 writePackageHtml fp = writeHtml fp . renderPackagePage
 
 
-renderPackagePage :: PackageInterface -> HtmlT Program ()
-renderPackagePage iface = doctypehtml_ $ do
-    let title = fromString (showPackageId iface)
+simplePage :: (Monad m) => String -> HtmlT m () -> HtmlT m ()
+simplePage titleString html = doctypehtml_ $ do
+    let title = fromString titleString
     head_ $ title_ title
     body_ $ do
         h1_ [ class_ "title" ] title
+        html
+
+
+renderPackagePage :: PackageInterface -> HtmlT Program ()
+renderPackagePage iface = do
+    let title = fromString (showPackageId iface)
+    simplePage title $
         renderModuleGroup . toList $ pkgExposedModules iface
 
 
-renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
-renderModuleGroup ifaces = do
-    let linkIfaces = map (makeIfaceLink &&& id) ifaces
+createLink ::
+    (Monad m, Monad n) =>
+    Text ->                  -- ^ unique element id
+    HtmlT m a ->             -- ^ hyperlink markup
+    HtmlT n b ->             -- ^ linked content
+    (HtmlT m a, HtmlT n b)
+createLink uniqueId link content =
+    ( a_ [ href_ (Text.pack "#" <> uniqueId) ] link
+    , with content [ id_ uniqueId ]
+    )
 
-    div_ [ class_ "links" ] $
-        ul_ $ forM_ linkIfaces $ \(linkText, m) ->
-            li_ $ a_ [ href_ (Text.pack "#" <> linkText) ] $
-                fromString $ moduleName m
-            
-    forM_ linkIfaces $ \(linkText, m) ->
-        renderModuleInterface m `with` [ id_ linkText ]
+createTextLink ::
+    (Monad m) =>
+    (a -> Text) ->               -- ^ create unique id
+    (a -> String) ->             -- ^ create link text
+    (a -> HtmlT m b) ->          -- ^ create content
+    a -> (HtmlT m (), HtmlT m b)
+createTextLink mkId mkText mkContent a =
+    createLink (mkId a) (fromString $ mkText a) (mkContent a)
+
+
+simpleLinkList :: (Monad m) =>
+    (a -> Text) ->
+    (a -> String) ->
+    (a -> HtmlT m b) ->
+    [a] -> HtmlT m ()
+simpleLinkList mkId mkText mkContent xs = do
+    let (links, sections) =
+            unzip $ map (createTextLink mkId mkText mkContent) xs
+
+    div_ [ class_ "links" ] $ ul_ $ mapM_ li_ links
+        
+    div_ $ sequence_ sections
+
+
+renderModulePage :: ModuleTarget -> ModuleInterface -> HtmlT Program ()
+renderModulePage target = simplePage target . renderModuleInterface
+
+
+renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
+renderModuleGroup = 
+    simpleLinkList makeId makeLinkText renderModuleInterface
   where
-    makeIfaceLink :: ModuleInterface -> Text
-    makeIfaceLink = Text.pack . map replaceDot . moduleName
+    makeId :: ModuleInterface -> Text
+    makeId = Text.pack . map replaceDot . moduleName
+
+    makeLinkText :: ModuleInterface -> String
+    makeLinkText = moduleName
 
     replaceDot c
         | c == '.' = '-'
