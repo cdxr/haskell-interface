@@ -1,8 +1,13 @@
+{-# LANGUAGE DeriveFunctor #-}
+
 module ProgramArgs
 (
     parseProgramArgs
   , ProgramArgs(..)
-  , Flag
+  , Command(..)
+  , Target(..)
+  , CompareTarget(..)
+  , Verbosity(..)
   , OutputFormat(..)
 )
 where
@@ -12,8 +17,6 @@ import Options.Applicative
 
 import LoadPackageInterface
 
-import Task
-
 
 parseProgramArgs :: IO ProgramArgs
 parseProgramArgs =
@@ -22,14 +25,36 @@ parseProgramArgs =
         , header "module-diff: view and compare module interfaces"
         ]
 
-type Flag = Bool
+data Command
+    = ShowCommand (Target String)
+    | CompareCommand (CompareTarget String)
+    deriving (Show, Eq, Ord)
+
+data Target a = Target
+    { targetDB :: Maybe PackageDB
+    , target :: a
+    } deriving (Show, Eq, Ord, Functor)
+
+data CompareTarget a
+    = CompareThisInstalled
+        -- ^ compare working directory package to installed version
+    | CompareInstalled (Target a)
+        -- ^ compare given package to installed version
+    | CompareThese (Target a) (Target a)
+        -- ^ compare given packages
+    deriving (Show, Eq, Ord, Functor)
+
+
+data Verbosity = Quiet | Verbose
+    deriving (Show, Eq, Ord)
 
 data ProgramArgs = ProgramArgs
-    { hideString :: Maybe String        -- internal
-    , outputClassInstances :: Flag      -- internal
+    { outputClassInstances :: Bool      -- internal
+    -- , dumpInterfaces :: Bool            -- internal
+    , verbosity :: Verbosity
     , outputFormat :: OutputFormat
     , outputFile :: Maybe FilePath
-    , programTask :: TargetTask
+    , programCommand :: Command
     } deriving (Show, Eq, Ord)
 
 
@@ -42,50 +67,66 @@ data OutputFormat
 mainParser :: Parser ProgramArgs
 mainParser =
   ProgramArgs
-    <$> optional opt_hide
-    <*> flag_instances
+    <$> switch_instances
+    <*> flag_verbosity
     <*> parseFormat
     <*> parseFile
-    <*> parseTask
+    <*> parseCommand
 
-opt_hide :: Parser String
-opt_hide = option str $ mconcat
-    [ long "hide"
-    , help "Hide interface elements referencing name"
-    , metavar "NAME"
-    , internal
+
+parseCommand :: Parser Command
+parseCommand = subparser $ mconcat
+    [ command "show" $
+        info (helper <*> parseShowCommand) $
+            progDesc "Print an interface summary for a package or module"
+    , command "compare" $
+        info (helper <*> (CompareCommand <$> parseCompare)) $
+            progDesc "Compare two packages or modules"
     ]
+  where
+    parseShowCommand = ShowCommand <$> parseTarget
+    parseCompare = asum
+        [ CompareThese <$> parseTarget <*> parseTarget
+        , CompareInstalled <$> parseTarget
+        , pure $ CompareThisInstalled
+        ]
 
-flag_instances :: Parser Flag
-flag_instances = switch $ mconcat
+
+parseTarget :: Parser (Target String)
+parseTarget = Target <$> optional db <*> argument str (metavar "TARGET")
+  where 
+    db = option pkgDB $ mconcat
+            [ long "package-db"
+            , short 'd'
+            , metavar "PATH"
+            , help "Package DB for next TARGET"
+            ]
+
+pkgDB :: ReadM PackageDB
+pkgDB = do
+    s <- str
+    pure $ case s of
+        "global" -> GlobalPackageDB
+        "user" -> UserPackageDB
+        _ -> SpecificPackageDB s
+        
+
+
+switch_instances :: Parser Bool
+switch_instances = switch $ mconcat
     [ long "instances"
     , help "Include class instances"
     , internal
     ]
 
-parseTask :: Parser TargetTask
-parseTask = subparser $ mconcat
-    [ command "show-package" $
-        info (helper <*> parsePrintPackageInterface) $
-            progDesc "Print a package interface summary"
-    , command "show" $
-        info (helper <*> parsePrintModule) $
-            progDesc "Print a module interface summary"
-    {-
-    , command "compare-packages" $
-        info (helper <*> parseComparePackageInterfaces) $
-            progDesc "Compare two package interfaces"
-    -}
-    , command "compare" $
-        info (helper <*> parseCompareModules) $
-            progDesc "Compare two module interfaces"
-    {-
-    , command "test" $
-        info (helper <*> parseRunTestModule) $
-            progDesc "Run a \"test\" module"
-    -}
+flag_verbosity :: Parser Verbosity
+flag_verbosity = flag Quiet Verbose $ mconcat
+    [ long "verbose"
+    , short 'v'
+    , help "Print diagnostic information"
     ]
 
+{-
 parsePackageTarget :: Parser PackageTarget
 parsePackageTarget =
     PackageTarget
@@ -95,18 +136,10 @@ parsePackageTarget =
                  ]
   where
     mkStack dbs = [GlobalPackageDB, UserPackageDB] ++ dbs
+-}
 
-pkgDB :: ReadM PackageDB
-pkgDB = SpecificPackageDB <$> str
-
-packageFilter :: ReadM PackageFilter
-packageFilter = readPackageFilter <$> str
-
-parsePrintPackageInterface :: Parser (Task PackageTarget m)
-parsePrintPackageInterface = PrintPackage <$> parsePackageTarget
-
-parsePrintModule :: Parser (Task p ModuleTarget)
-parsePrintModule = PrintModule <$> argument str (metavar "MODULE")
+packageSelector :: ReadM PackageSelector
+packageSelector = readPackageSelector <$> str
 
 parseFormat :: Parser OutputFormat
 parseFormat = flag OutputConsole OutputHtml $ mconcat
@@ -115,33 +148,8 @@ parseFormat = flag OutputConsole OutputHtml $ mconcat
     ]
 
 parseFile :: Parser (Maybe FilePath)
-parseFile = option (Just <$> str) $ mconcat
+parseFile = optional $ option str $ mconcat
     [ short 'o'
     , help "Output file"
     , metavar "FILE"
-    , value Nothing
     ]
-
-
-{-
-parseComparePackageInterfaces :: Parser Task
-parseComparePackageInterfaces =
-    ComparePackages
-        <$> argument str (metavar "OLD-PACKAGE")
-        <*> argument str (metavar "NEW-PACKAGE")
--}
-
-parseCompareModules :: Parser (Task p ModuleTarget)
-parseCompareModules =
-    CompareModules
-        <$> argument str (metavar "OLD-MODULE")
-        <*> argument str (metavar "NEW-MODULE")
-
-{-
-parseRunTestModule :: Parser Task
-parseRunTestModule = RunTestModule <$> option str fields
-  where
-    fields = long "test"
-          <> short 't'
-          <> metavar "TEST-TARGET"
--}

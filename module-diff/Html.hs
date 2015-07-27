@@ -26,11 +26,11 @@ import ProgramArgs
 import Render
 
 
-runTask :: LoadedTask -> Program ()
-runTask t = do
-    let html = case t of
-            PrintPackage p -> renderPackagePage p
-            PrintModule (tgt,m) -> renderModulePage tgt m
+runTask :: ProgramResult -> Program ()
+runTask r = do
+    let html = case r of
+            APackage p -> renderPackagePage p
+            AModule tgt m -> renderModulePage tgt m
             _ -> error "Html.runTask unimplemented for this target type"
 
     mfp <- getArg outputFile
@@ -101,7 +101,7 @@ simpleLinkList mkId mkText mkContent xs = do
 
 
 renderModulePage :: ModuleTarget -> ModuleInterface -> HtmlT Program ()
-renderModulePage target = simplePage target . renderModuleInterface
+renderModulePage (Target _ s) = simplePage s . renderModuleInterface
 
 
 renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()

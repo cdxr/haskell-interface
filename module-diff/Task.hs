@@ -2,43 +2,90 @@
 
 module Task where
 
-import LoadPackageInterface ( PackageFilter, PackageDB )
+import Data.Bool ( bool )
+import Data.Char ( isLower, isUpper )
 
-import Data.Interface ( PackageInterface, ModuleInterface )
+import LoadPackageInterface ( PackageSelector(..), readPackageSelector,
+                              PackageDB(..) )
 
+import Data.Interface ( PackageInterface, PackageDiff,
+                        ModuleInterface, ModuleDiff )
 
--- | A program task, parameterized over the types of packages and modules.
--- The type parameters are determined by the program phase.
-data Task p m
-    = PrintPackage p
---  | ComparePackages p p
-    | PrintModule m
-    | CompareModules m m
---  | RunTestModule FilePath
-    deriving (Show, Eq, Ord, Functor)
+import Program
+import ProgramArgs
 
 
-bitraverseTask ::
-    (Applicative f) =>
-    (a -> f p) ->
-    (b -> f m) ->
-    Task a b -> f (Task p m)
-bitraverseTask p m t = case t of
-    PrintPackage a -> PrintPackage <$> p a
-    PrintModule b  -> PrintModule <$> m b
-    CompareModules b0 b1 -> CompareModules <$> m b0 <*> m b1
+-- | A `PackageName`, `PackageId`, or `InstalledPackageId`, optionally
+-- annotated with a package database location.
+type PackageTarget = Target PackageSelector
 
+-- | Interpret a target as a `PackageTarget`. Evaluates to `Nothing` if the
+-- `String` is not a valid `PackageSelector` or if the package database
+-- location is not valid.
+resolvePackageTarget :: Target String -> Maybe PackageTarget
+resolvePackageTarget t@(Target _ s) = case s of
+    c:_ | isLower c -> Just $ readPackageSelector <$> t
+    _ -> Nothing
 
-
-type TargetTask = Task PackageTarget ModuleTarget
-
-data PackageTarget = PackageTarget PackageFilter [PackageDB]
-    deriving (Show, Eq, Ord)
 
 -- | The filepath to a Module, or the name of an installed Module
-type ModuleTarget = String
+type ModuleTarget = Target String
+
+-- | The `String` used to identify a `ModuleTarget` to the user.
+moduleTargetString :: ModuleTarget -> String
+moduleTargetString (Target _ s) = s  -- TODO
+
+resolveModuleTarget :: Target String -> Maybe ModuleTarget
+resolveModuleTarget t@(Target _ s) = case s of
+    c:cs | isUpper c -> Just t    -- if the first character is upper-case,
+    _ -> Nothing                  -- assume that this is a module target
 
 
+-- | The task that the program is asked to perform. This is constructed after
+-- program arguments have been correctly parsed, but before verifying the
+-- existence or validity of any `PackageTarget` or `ModuleTarget`.
+data ProgramTarget
+    = PrintPackage PackageTarget
+    | ComparePackages PackageTarget PackageTarget
+    | PrintModule ModuleTarget
+    | CompareModules ModuleTarget ModuleTarget
+    deriving (Show, Eq, Ord)
 
-type LoadedTask = Task PackageInterface (ModuleTarget, ModuleInterface)
--- note: ^ original ModuleTarget stored for reporting purposes
+-- | Determine the `ProgramTarget` from the implicitly-given `ProgramArgs`.
+resolveProgramTarget :: Program ProgramTarget
+resolveProgramTarget = do
+    com <- getArg programCommand
+    case com of
+        ShowCommand t
+            | Just pt <- resolvePackageTarget t ->
+                pure $ PrintPackage pt
+            | Just mt <- resolveModuleTarget t ->
+                pure $ PrintModule mt
+            | otherwise ->
+                error "Target does not represent a package or module"
+        CompareCommand c -> case c of
+            CompareThisInstalled ->
+                error "compare command without arguments unimplemented" -- TODO
+            CompareInstalled t ->
+                error "compare command with single argument unimplemented"
+            CompareThese t0 t1
+                | Just t <-
+                    ComparePackages <$> resolvePackageTarget t0
+                                    <*> resolvePackageTarget t1
+                    -> pure t
+                | Just t <-
+                    CompareModules <$> resolveModuleTarget t0
+                                   <*> resolveModuleTarget t1
+                    -> pure t
+                | otherwise ->
+                    error "incompatible targets"
+
+
+-- | The "payload" of the program, containing the result for the user-given
+-- task. This information is presented to the user according to the chosen
+-- `OutputFormat`.
+data ProgramResult
+    = APackage PackageInterface
+    | APackageDiff PackageDiff
+    | AModule ModuleTarget ModuleInterface
+    | AModuleDiff ModuleTarget ModuleTarget ModuleDiff

@@ -8,7 +8,6 @@ import Control.Monad.Trans.State
 import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
-
 import LoadPackageInterface
 import Data.Interface
 
@@ -37,13 +36,18 @@ getQualContext = Program (lift get)
 unqualify :: ModuleName -> Program ()
 unqualify = Program . lift . modify . unqualifyModule
 
-whenFlag :: (ProgramArgs -> Flag) -> Program a -> Program (Maybe a)
-whenFlag f m = do
+whenArgs :: (ProgramArgs -> Bool) -> Program a -> Program (Maybe a)
+whenArgs f m = do
     b <- getArg f
     if b then Just <$> m else pure Nothing
 
-whenFlag_ :: (ProgramArgs -> Flag) -> Program () -> Program ()
-whenFlag_ f m = do
+whenArgs_ :: (ProgramArgs -> Bool) -> Program () -> Program ()
+whenArgs_ f m = do
     b <- getArg f
     when b m
 
+
+verbose :: String -> Program ()
+verbose msg = do
+    whenArgs_ ((>= Verbose) . verbosity) $
+        liftIO $ putStrLn msg

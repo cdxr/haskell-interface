@@ -3,19 +3,18 @@ module Console where
 import Control.Monad.IO.Class
 
 import Data.Interface
-import Data.Interface.Change ( diff )
 
 import Task
 import Program
 import Render ( Render(..), renderStdout )
 
 
-runTask :: LoadedTask -> Program ()
-runTask task = case task of
-    PrintPackage p -> printPackageInterface p
-    PrintModule (_, m) -> printModuleInterface m
-    CompareModules (t0, m0) (t1, m1) -> printModuleDiff (t0, t1) (diff m0 m1)
-    --RunTestModule t -> runTestModule t
+runTask :: ProgramResult -> Program ()
+runTask r = case r of
+    APackage p -> printPackageInterface p
+    AModule _ m -> printModuleInterface m
+    AModuleDiff t0 t1 mdiff -> printModuleDiff (t0, t1) mdiff
+    _ -> error "Console.runTask unimplemented for this target type"
 
 
 printPackageInterface :: PackageInterface -> Program ()
@@ -48,8 +47,8 @@ printModuleDiff (t0, t1) mdiff = do
         [ ""
         , "************************************"
         , " Comparing Modules:"
-        , "   " ++ t0
-        , "   " ++ t1
+        , "   " ++ moduleTargetString t0
+        , "   " ++ moduleTargetString t1
         , "************************************"
         ]
 

@@ -7,12 +7,13 @@ module LoadPackageInterface
   , resetPackageDB
   , getPackageIndex
 
-  , PackageFilter(..)
-  , readPackageFilter
-  , showPackageFilter
+  , PackageSelector(..)
+  , readPackageSelector
+  , showPackageSelector
   , filterPackages
 
   , LocPackage(..)
+  , showLocPackage
   , packageLocations 
 
   -- * Cabal
@@ -32,6 +33,7 @@ import Control.Monad.IO.Class
 import GHC
 import DynFlags
 import qualified Outputable as Out
+import qualified Linker as GHC
 import qualified Packages as GHC
 import qualified PackageConfig as GHC
 
@@ -83,29 +85,30 @@ getPackageIndex env pdb = do
             pure ipi
 
 
-data PackageFilter
+data PackageSelector
     = MatchName PackageName
     | MatchId PackageId
     | MatchInstalledId InstalledPackageId
     deriving (Show, Eq, Ord)
 
-readPackageFilter :: String -> PackageFilter
-readPackageFilter s
+-- TODO: identify `InstalledPackageId`s
+readPackageSelector :: String -> PackageSelector
+readPackageSelector s
     | '-' `elem` s, Just pid <- parsePackageId s =
         MatchId pid
     | otherwise =
         MatchName $ PackageName s
 
-showPackageFilter :: PackageFilter -> String
-showPackageFilter pf = case pf of
+showPackageSelector :: PackageSelector -> String
+showPackageSelector sel = case sel of
     MatchName n -> Cabal.display n
     MatchId pid -> Cabal.display pid
     MatchInstalledId ipid -> Cabal.display ipid
 
 
 filterPackages ::
-    PackageFilter -> InstalledPackageIndex -> [InstalledPackageInfo]
-filterPackages pf pix = case pf of
+    PackageSelector -> InstalledPackageIndex -> [InstalledPackageInfo]
+filterPackages sel pix = case sel of
     MatchName n -> concatMap snd $ Cabal.lookupPackageName pix n
     MatchId pid -> Cabal.lookupSourcePackageId pix pid 
     MatchInstalledId ipid ->
@@ -116,24 +119,31 @@ filterPackages pf pix = case pf of
 data LocPackage = LocPackage PackageDB InstalledPackageInfo
     deriving (Show)
 
+showLocPackage :: LocPackage -> String
+showLocPackage (LocPackage db ipi) =
+    Cabal.display (Cabal.packageId ipi) ++ " " ++ case db of
+        GlobalPackageDB -> "[global]"
+        UserPackageDB -> "[user]"
+        SpecificPackageDB fp -> "(" ++ fp ++ ")"
+
 packageLocations ::
     PackageEnv ->
-    PackageFilter ->
+    PackageSelector ->
     [PackageDB] ->
     IO [LocPackage]
-packageLocations env pf = fmap concat . mapM list
+packageLocations env sel = fmap concat . mapM list
   where
     list :: PackageDB -> IO [LocPackage]
     list db = do
         pix <- getPackageIndex env db 
-        pure [ LocPackage db pkg | pkg <- filterPackages pf pix ]
+        pure [ LocPackage db pkg | pkg <- filterPackages sel pix ]
 
 
 makeModuleName :: Cabal.ModuleName -> Interface.ModuleName
 makeModuleName = intercalate "." . components
 
 makePackageInterface :: LocPackage -> IO PackageInterface
-makePackageInterface lp@(LocPackage db ipi) = do
+makePackageInterface lp@(LocPackage _ ipi) = do
     withGhc $ do
         ghcLocPackage lp
 
@@ -149,12 +159,11 @@ makePackageInterface lp@(LocPackage db ipi) = do
 ghcLocPackage :: LocPackage -> Ghc ()
 ghcLocPackage (LocPackage db ipi) = do
     dflags0 <- getSessionDynFlags
-    _ <- setSessionDynFlags $ dflags0
+    _pkgKeys <- setSessionDynFlags dflags0
             { extraPkgConfs = (toPkgConfRef db :)
             , packageFlags = [ ExposePackage (pkgKeyArg ipi) modRenaming ]
             }
-    _ <- liftIO $ GHC.initPackages dflags0
-        -- ignored value: ^ do we need to set the session flags again?
+    --liftIO $ GHC.linkPackages dflags pkgKeys
 
     return ()
   where
