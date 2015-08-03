@@ -197,6 +197,14 @@ mapNamed :: (a -> b) -> Named' n a -> Named' n b
 mapNamed = fmap
 {-# INLINABLE mapNamed #-}
 
+-- | Evaluate @Just@ the given function applied to two named values when their
+-- names match; otherwise, evaluate to @Nothing@.
+mergeNamedMatch ::
+    (Eq n) => (a -> b -> c) -> Named' n a -> Named' n b -> Maybe (Named' n c)
+mergeNamedMatch f (Named na a) (Named nb b)
+    | na == nb = Just $ Named nb (f a b)
+    | otherwise = Nothing
+
 
 --wrapNamed :: (HasRawName a) => a -> Named a
 --wrapNamed a = Named (rawName a) a

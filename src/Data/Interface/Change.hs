@@ -26,6 +26,9 @@ data Change a = NoChange a | Change a a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 
+-- | Case analysis for the @Change a@ type, analagous to `maybe` from Prelude.
+-- @change f g c@ evaluates to @f x@ when @c@ is @NoChange x@, and evaluates
+-- to @g x y@ when @c@ is @Change x y@.
 change :: (a -> b) -> (a -> a -> b) -> Change a -> b
 change n _ (NoChange a) = n a
 change _ c (Change a b) = c a b
@@ -263,9 +266,6 @@ diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
 
 -- ** Map
 
--- | When @f a@ is a container of @a@s and @c@ is a change to an @a@,
--- @ElemChanges f c a@ is a change to container of @a@s in which 
-
 -- | When @c@ represents a change to an @a@ and @f a@ is an associative
 -- container of @a@s, @ElemChanges f c a@ represents a change to such a
 -- container in which elements may have been added, removed, or changed.
@@ -318,70 +318,3 @@ diffMap a b = toMapDiff $ Map.mergeWithKey combine only1 only2 a b
     toMapDiff m
         | any isElemChanged m = ElemChanges m
         | otherwise = NoElemChanges b
-
-
-
-{-
-diffSetSummary :: (Diff a c) => DiffSet c a -> DiffSummary c a
-diffSetSummary = transDiffSummary reverse . foldr (addDiffElem (:)) mempty
-
-diffMapSummary' ::
-    (Diff a c, Ord k) =>
-    MapDiff k c a -> DiffSummary' (Map k) c a
-diffMapSummary' m = case m of
-    NoElemChanges m -> mempty { unchanged = m }
-    ElemChanges m -> Map.foldrWithKey f mempty m
-  where
-    f :: (Diff a c, Ord k) =>
-         k ->
-         Elem c a ->
-         DiffSummary' (Map k) c a -> DiffSummary' (Map k) c a
-    f k d = addDiffElem (Map.insert k) d
-
-diffMapSummary :: (Diff a c, Ord k) => MapDiff k c a -> DiffSummary c a
-diffMapSummary = transDiffSummary Map.elems . diffMapSummary'
-
-
--- * DiffSummary
-
-data DiffSummary' f c a = DiffSummary
-    { unchanged :: f a
-    , added     :: f a
-    , removed   :: f a
-    , changed   :: f c
-    } deriving (Show, Eq, Ord)
-
-type DiffSummary = DiffSummary' []
-
-
-instance (Monoid (f a), Monoid (f c)) => Monoid (DiffSummary' f c a) where
-    mempty = DiffSummary mempty mempty mempty mempty
-    mappend a b = DiffSummary
-        { unchanged = on (<>) unchanged a b
-        , added     = on (<>) added a b
-        , removed   = on (<>) removed a b
-        , changed   = on (<>) changed a b
-        } 
-
-transDiffSummary ::
-    (forall b. f b -> g b) ->
-    DiffSummary' f c a -> DiffSummary' g c a
-transDiffSummary f (DiffSummary a b c d) = DiffSummary (f a) (f b) (f c) (f d)
-
-addDiff ::
-    (Diff a c) =>
-    (forall b. b -> f b -> f b) ->
-    c -> DiffSummary' f c a -> DiffSummary' f c a
-addDiff add c ds = case same c of
-    Just a  -> ds { unchanged = add a (unchanged ds) }
-    Nothing -> ds { changed   = add c (changed ds) }
-
-addDiffElem ::
-    (Diff a c) =>
-    (forall b. b -> f b -> f b) ->
-    Elem c a -> DiffSummary' f c a -> DiffSummary' f c a
-addDiffElem add e ds = case e of
-    Removed a -> ds { removed   = add a (removed ds) }
-    Added a   -> ds { added     = add a (added ds)}
-    Changed c -> addDiff add c ds
--}

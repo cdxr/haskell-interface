@@ -6,7 +6,9 @@ module Data.Interface.ModuleDiff where
 
 import Data.Function ( on )
 import Data.Bifunctor ( first )
+
 import Data.Set ( Set )
+import qualified Data.Set  as Set
 
 import Data.Interface.Source ( Origin )
 import Data.Interface.Module
@@ -66,9 +68,6 @@ instance Diff ValueDecl ValueDeclDiff where
 
     toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
 
-    isChanged (ValueDeclDiff t i) = isChanged i || isChanged t
-
-
 
 data TypeDeclDiff = TypeDeclDiff
     { tdKindDiff :: Change Kind
@@ -107,22 +106,55 @@ diffModuleExports mdiff = map go . ordSetDiffElems $ diffModuleExportList mdiff
         NoChange e ->           -- this is only possible if  @isSame mdiff@
             ExportDiff $ NoChange e
         Change (LocalValue vd0) (LocalValue vd1)
-            | Just n <- matchNames vd0 vd1 ->
-                LocalValueDiff $ named n $ diff (unName vd0) (unName vd1)
+            | Just valDiff <- mergeNamedMatch diff vd0 vd1 ->
+                LocalValueDiff valDiff
         Change (LocalType td0) (LocalType td1)
-            | Just n <- matchNames td0 td1 ->
-                LocalTypeDiff $ named n $ diff (unName td0) (unName td1)
+            | Just typeDiff <- mergeNamedMatch diff td0 td1 ->
+                LocalTypeDiff typeDiff
         _ -> ExportDiff c
-    
+
+
 
 lookupExportElem ::
     SetElem ExportName -> ModuleDiff -> Elem (Change Export) Export
 lookupExportElem e mdiff =
     fmap unsafeFindExport (toChange mdiff) `applyChange` setElemChange e
 
-
 isLocalElemChange ::
     Elem (Change (Qual a)) (Qual a) ->
     ModuleDiff ->
     Elem (Change Bool) Bool
 isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e
+
+
+
+{-
+data ExportDiffSummary = ExportDiffSummary
+    { removedExports   :: Set Export
+    , addedExports     :: Set Export
+    , unchangedExports :: Set Export
+    , changedExports   :: Set ExportDiff
+    } deriving (Show, Eq, Ord)
+
+instance Monoid ExportDiffSummary where
+    mempty = ExportDiffSummary Set.empty Set.empty Set.empty Set.empty
+    mappend a b = ExportDiffSummary
+        { removedExports   = on Set.union removedExports a b
+        , addedExports     = on Set.union addedExports a b
+        , unchangedExports = on Set.union unchangedExports a b
+        , changedExports   = on Set.union changedExports a b
+        }
+
+-- TODO: make ExportDiff an instance of `Diff Export`, simplifying the
+--  Elem case below.
+singleExportDiff :: Elem ExportDiff Export -> ExportDiffSummary
+singleExportDiff el = case el of
+    Removed e  -> mempty { removedExports = Set.singleton e }
+    Added e    -> mempty { addedExports   = Set.singleton e }
+    Elem ediff -> case exportDiffChange ediff of
+        NoChange e -> mempty { unchangedExports = Set.singleton e }
+        Change{} ->   mempty { changedExports = Set.singleton ediff }
+
+diffExportSummary :: ModuleDiff -> ExportDiffSummary
+diffExportSummary = foldMap singleExportDiff . diffModuleExports
+-}

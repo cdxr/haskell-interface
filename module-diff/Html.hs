@@ -8,6 +8,7 @@ import Control.Monad.IO.Class
 
 import Data.Monoid
 import Data.Foldable
+import Data.List ( sortBy )
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Blaze.ByteString.Builder as Blaze
@@ -113,8 +114,8 @@ renderModuleDiffPage t0 t1 mdiff =
     simplePage title (renderModuleDiff t0 t1 mdiff)
   where
     Change name0 name1 = moduleName <$> toChange mdiff
-    title | name0 == name1 = name1
-          | otherwise = name0 ++ " / " ++ name1
+    title | name0 == name1 = name1 ++ " (version comparison)"
+          | otherwise = name0 ++ " / " ++ name1 ++ " (module comparison)"
 
 
 renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
@@ -148,7 +149,18 @@ renderModuleDiff tgt0 tgt1 mdiff = do
         li_ [ class_ "module-source" ] $ toHtml $ moduleTargetString tgt1
 
     ul_ [ class_ "export-list" ] $
-        mapM_ (li_ . renderElemExportDiff) (diffModuleExports mdiff)
+        mapM_ (li_ . renderElemExportDiff) $
+            diffModuleExports mdiff
+            --prepareExportDiffList $ diffModuleExports mdiff
+
+
+-- | Sort and filter the list of export differences.
+prepareExportDiffList :: [Elem ExportDiff Export] -> [Elem ExportDiff Export]
+prepareExportDiffList = sortBy $ \a b -> case a of
+    Added{}     -> LT
+    Removed{}   -> LT
+    Elem ediff | isChanged (exportDiffChange ediff) -> LT
+    _ -> compare a b
 
 
 renderExport :: Export -> HtmlT Program ()

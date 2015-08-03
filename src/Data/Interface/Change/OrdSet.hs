@@ -66,7 +66,7 @@ ordSetDiffElems :: (Ord a) => OrdSetDiff a -> [SetElem a]
 ordSetDiffElems (OrdSetDiff os0 os1 osm) = case osm of
     NoElemChanges{} -> map (Elem . Same) (toList os1)
     ElemChanges m ->
-        mapMaybe (go m) . Data.List.nub $ merge (toList os1) (toList os0)
+        mapMaybe (go m) . Data.List.nub $ toList os0 ++ toList os1
   where
     go :: (Ord a) => Map a (Elem (Change Int) Int) -> a -> Maybe (SetElem a)
     go m x = case Map.lookup x m of
@@ -75,9 +75,6 @@ ordSetDiffElems (OrdSetDiff os0 os1 osm) = case osm of
             Removed{} -> Removed x
             Added{}   -> Added x
             Elem{}    -> Elem (Same x)
-
-    merge [] ys = ys
-    merge (x:xs) ys = x : merge ys xs
 
 
 lookupElemIndexDiff :: (Ord a) => a -> OrdSetDiff a -> Maybe (ElemEq Int)
