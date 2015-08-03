@@ -55,8 +55,10 @@ instance Diff ModuleInterface ModuleDiff where
 
 
 
-data ValueDeclDiff = ValueDeclDiff TypeDiff (Change ValueDeclInfo)
-    deriving (Show, Eq, Ord)
+data ValueDeclDiff = ValueDeclDiff
+    { vdTypeDiff :: TypeDiff
+    , vdInfoDiff :: Change ValueDeclInfo
+    } deriving (Show, Eq, Ord)
 
 instance Diff ValueDecl ValueDeclDiff where
     diff (ValueDecl ta ia) (ValueDecl tb ib) =
@@ -68,8 +70,10 @@ instance Diff ValueDecl ValueDeclDiff where
 
 
 
-data TypeDeclDiff = TypeDeclDiff (Change Kind) (Change TypeDeclInfo)
-    deriving (Show, Eq, Ord)
+data TypeDeclDiff = TypeDeclDiff
+    { tdKindDiff :: Change Kind
+    , tdInfoDiff :: Change TypeDeclInfo
+    } deriving (Show, Eq, Ord)
 
 instance Diff TypeDecl TypeDeclDiff where
     diff (TypeDecl ka ia) (TypeDecl kb ib) =
@@ -83,6 +87,13 @@ data ExportDiff
     | LocalTypeDiff (Named TypeDeclDiff)            -- a TypeDeclDiff
     | ExportDiff (Change Export)                    -- none of the above
     deriving (Show, Eq, Ord)
+
+
+exportDiffChange :: ExportDiff -> Change Export
+exportDiffChange ediff = case ediff of
+    LocalValueDiff vd -> LocalValue <$> traverse toChange vd
+    LocalTypeDiff td  -> LocalType <$> traverse toChange td
+    ExportDiff c      -> c
 
 
 diffModuleExports :: ModuleDiff -> [Elem ExportDiff Export]

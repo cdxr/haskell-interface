@@ -5,11 +5,14 @@ module Task where
 import Data.Bool ( bool )
 import Data.Char ( isLower, isUpper )
 
+import qualified System.FilePath as Path
+
 import LoadPackageInterface ( PackageSelector(..), readPackageSelector,
                               PackageDB(..) )
 
 import Data.Interface ( PackageInterface, PackageDiff,
-                        ModuleInterface, ModuleDiff )
+                        ModuleInterface, ModuleDiff,
+                        ModuleName, isValidModuleName )
 
 import Program
 import ProgramArgs
@@ -24,21 +27,34 @@ type PackageTarget = Target PackageSelector
 -- location is not valid.
 resolvePackageTarget :: Target String -> Maybe PackageTarget
 resolvePackageTarget t@(Target _ s) = case s of
-    c:_ | isLower c -> Just $ readPackageSelector <$> t
+    c:_ | isLower c && notElem '/' s -> Just $ readPackageSelector <$> t
     _ -> Nothing
 
 
 -- | The filepath to a Module, or the name of an installed Module
-type ModuleTarget = Target String
+type ModuleTarget = Target (Either FilePath ModuleName)
 
 -- | The `String` used to identify a `ModuleTarget` to the user.
 moduleTargetString :: ModuleTarget -> String
-moduleTargetString (Target _ s) = s  -- TODO
+moduleTargetString (Target _ e) = either id id e
 
 resolveModuleTarget :: Target String -> Maybe ModuleTarget
-resolveModuleTarget t@(Target _ s) = case s of
-    c:cs | isUpper c -> Just t    -- if the first character is upper-case,
-    _ -> Nothing                  -- assume that this is a module target
+resolveModuleTarget t@(Target _ s)
+    | isValidModuleName s = Just $ fmap Right t
+    | Path.isValid s && validExtension s = Just $ fmap Left t
+    | otherwise = Nothing
+  where
+    validExtension fp = any (== Path.takeExtension fp) [".hs", ".lhs"]
+
+
+resolveTarget :: Target String -> Program (Either PackageTarget ModuleTarget)
+resolveTarget t@(Target _ s)
+    | Just pt <- resolvePackageTarget t =
+        pure $ Left pt
+    | Just mt <- resolveModuleTarget t =
+        pure $ Right mt
+    | otherwise =
+        error $ "target does not represent a package or module: " ++ s
 
 
 -- | The task that the program is asked to perform. This is constructed after
@@ -56,29 +72,30 @@ resolveProgramTarget :: Program ProgramTarget
 resolveProgramTarget = do
     com <- getArg programCommand
     case com of
-        ShowCommand t
-            | Just pt <- resolvePackageTarget t ->
-                pure $ PrintPackage pt
-            | Just mt <- resolveModuleTarget t ->
-                pure $ PrintModule mt
-            | otherwise ->
-                error "Target does not represent a package or module"
+        ShowCommand t -> either PrintPackage PrintModule <$> resolveTarget t
         CompareCommand c -> case c of
             CompareThisInstalled ->
                 error "compare command without arguments unimplemented" -- TODO
             CompareInstalled t ->
                 error "compare command with single argument unimplemented"
-            CompareThese t0 t1
-                | Just t <-
-                    ComparePackages <$> resolvePackageTarget t0
-                                    <*> resolvePackageTarget t1
-                    -> pure t
-                | Just t <-
-                    CompareModules <$> resolveModuleTarget t0
-                                   <*> resolveModuleTarget t1
-                    -> pure t
-                | otherwise ->
-                    error "incompatible targets"
+            CompareThese t0 t1 -> do
+                et0 <- resolveTarget t0
+                et1 <- resolveTarget t1
+
+                case (et0, et1) of
+                    (Left pt0, Left pt1) ->
+                        pure $ ComparePackages pt0 pt1
+                    (Right mt0, Right mt1) ->
+                        pure $ CompareModules mt0 mt1
+                    _ -> let showTargetType Left{}  = "package"
+                             showTargetType Right{} = "module"
+                         in error $ unwords
+                             [ "incompatible targets: can't compare"
+                             , showTargetType et0
+                             , "to"
+                             , showTargetType et1
+                             ]
+
 
 
 -- | The "payload" of the program, containing the result for the user-given

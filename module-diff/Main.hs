@@ -70,7 +70,10 @@ loadModule (Target mpath s) = do
     when (isJust mpath) $
         error "--package-db unimplemented for module targets"   -- TODO
 
-    iface <- liftIO $ withGhc $ makeInterface =<< guessGoal s
+    iface <- liftIO $ withGhc $
+        makeInterface =<< guessGoal (either id id s)
+            -- TODO: ^ we discard the information about whether the module is
+            --         a path or module name, and let GHC work it out by itself
 
     -- remember not to qualify names from this module
     unqualify $ moduleName iface  

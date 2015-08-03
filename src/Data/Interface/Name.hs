@@ -13,12 +13,17 @@ import Data.Coerce
 import Data.Functor.Identity
 import Data.Functor.Constant
 
+import Data.Maybe ( isJust )
+
 import Data.Profunctor.Unsafe ( (#.) )
 
 import Data.Monoid
 
 import Data.Set ( Set )
 import qualified Data.Set as Set
+
+import qualified Distribution.ModuleName as Cabal ( ModuleName )
+import qualified Distribution.Text as Cabal ( simpleParse )
 
 import Data.Interface.Source ( Origin )
 
@@ -48,6 +53,13 @@ data SomeName = SomeName !Namespace !RawName
 type ModuleName = String
 -- TODO:  ModuleName must encode precise origin
 --          (package w/ version or filename)
+
+isValidModuleName :: String -> Bool
+isValidModuleName = isJust . go
+  where
+    go :: String -> Maybe Cabal.ModuleName
+    go = Cabal.simpleParse
+
 
 
 -- * Qual
