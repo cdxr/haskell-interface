@@ -19,7 +19,7 @@ data Type
     | Fun Type Type               -- ^ (->) type constructor
     | Var TypeVar                 -- ^ type variables ("a")
     | Forall [TypeVar] Type       -- ^ forall qualifiers / constraints
-    | Context [Pred] Type         -- ^ class and equality predicates
+    | Context [Pred Type] Type    -- ^ class and equality predicates
     deriving (Show, Eq, Ord)
 
 
@@ -32,7 +32,7 @@ data TypeF a
     | FunF a a                     -- ^ (->) type constructor
     | VarF TypeVar                 -- ^ type variables ("a")
     | ForallF [TypeVar] a          -- ^ forall qualifiers / constraints
-    | ContextF [Pred] a            -- ^ class and equality predicates
+    | ContextF [Pred Type] a       -- ^ class and equality predicates
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 type instance FF.Base Type = TypeF
@@ -77,19 +77,19 @@ type TypeConLink = Qual RawName
 
 
 -- | A class or equality predicate
-data Pred
-    = ClassPred (Qual RawName) [Type]          
-    | EqPred EqRel Type Type
-    deriving (Show, Eq, Ord)
+data Pred a
+    = ClassPred [a]          
+    | EqPred EqRel a a
+    deriving (Show, Eq, Ord, Functor)
 
 -- | A choice of equality relation. Copied from GHC.Type.
 data EqRel = NomEq | ReprEq
     deriving (Show, Eq, Ord)
 
-instance TraverseNames Pred where
+instance (TraverseNames a) => TraverseNames (Pred a) where
     traverseNames f p = case p of
-        ClassPred q ts ->
-            ClassPred <$> traverseNames f q <*> traverse (traverseNames f) ts
+        ClassPred ts ->
+            ClassPred <$> traverse (traverseNames f) ts
         EqPred r a b ->
             EqPred r <$> traverseNames f a <*> traverseNames f b
 
@@ -110,6 +110,7 @@ data TypeCon = TypeCon
     , typeConKind   :: Kind
     , typeConInfo   :: TypeConInfo
     } deriving (Show, Eq, Ord)
+
 
 data TypeConInfo
     = ConAlgebraic   -- ^ data/newtype declaration

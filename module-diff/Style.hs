@@ -19,7 +19,7 @@ mainStyleText = render mainStyle
 mainStyle :: Css
 mainStyle = do
     body ? do
-        backgroundColor "#fdf6f6"
+        backgroundColor "#f0f0f0"
         fontFamily [] [monospace]
 
     byClass "removed" & color removalColor

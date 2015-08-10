@@ -24,7 +24,7 @@ var = Var
 forall :: [TypeVar] -> Type -> Type
 forall = Forall
 
-context :: [Pred] -> Type -> Type
+context :: [Pred Type] -> Type -> Type
 context ps t0 = case t0 of
     Context ps' t -> Context (ps ++ ps') t      -- merge nested contexts
     _ -> Context ps t0

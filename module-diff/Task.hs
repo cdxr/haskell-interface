@@ -2,13 +2,11 @@
 
 module Task where
 
-import Data.Bool ( bool )
-import Data.Char ( isLower, isUpper )
+import Data.Char ( isLower )
 
 import qualified System.FilePath as Path
 
-import LoadPackageInterface ( PackageSelector(..), readPackageSelector,
-                              PackageDB(..) )
+import LoadPackageInterface ( PackageSelector(..), readPackageSelector )
 
 import Data.Interface ( PackageInterface, PackageDiff,
                         ModuleInterface, ModuleDiff,

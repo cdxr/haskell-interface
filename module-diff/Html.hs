@@ -3,12 +3,10 @@
 module Html where
 
 import Control.Monad
-import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
 import Data.Monoid
 import Data.Foldable
-import Data.List ( sortBy )
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Blaze.ByteString.Builder as Blaze
@@ -18,13 +16,14 @@ import qualified Data.Text as Text
 
 import Data.Interface
 import Data.Interface.Change
+import Data.Interface.Type.Render
 
 import Lucid
 
 import Task
 import Program
 import ProgramArgs
-import Render
+--import Render
 import Style
 
 
@@ -204,8 +203,8 @@ renderExportElem (Named n e) =
 renderEntity :: Entity -> HtmlT Program ()
 renderEntity e = do
     case e of
-        LocalValue vd -> renderType (vdType vd)
-        LocalType td -> renderKind (tdKind td)
+        LocalValue vd -> renderEntityType (vdType vd)
+        LocalType td -> renderEntityKind (tdKind td)
         ReExport m ns ->
             ol_ $ do
                 div_ [ class_ "namespace" ] $ showNamespace ns
@@ -219,26 +218,37 @@ renderEntity e = do
 renderEntityDiff :: EntityDiff -> HtmlT Program ()
 renderEntityDiff = renderDiff_ renderEntity
 
-renderType :: Type -> HtmlT Program ()
-renderType t = do
-    qc <- lift getQualContext
-    div_ [ class_ "type signature" ] $
-        toHtml $ " :: " ++ renderToString 0 qc t
+renderEntityType :: Type -> HtmlT Program ()
+renderEntityType t = do
+    --qc <- lift getQualContext
+    div_ [ class_ "type signature" ] $ " :: " <> renderType t
 
-renderKind :: Kind -> HtmlT Program ()
-renderKind k = do
-    qc <- lift getQualContext
-    div_ [ class_ "kind signature" ] $
-        toHtml $ " :: " ++ renderToString 0 qc k
+renderType :: (Monad m) => Type -> HtmlT m ()
+renderType = renderTypeSig toHtml renderTypeCon . typeSig
 
+renderTypeCon :: (Monad m) => TypeConLink -> HtmlT m ()
+renderTypeCon q =
+    abbr_ [ class_ "typecon", title_ t ] $ toHtml (rawName q)
+  where
+    t = Text.pack $ showQualName q
+
+renderEntityKind :: Kind -> HtmlT Program ()
+renderEntityKind k = do
+    --qc <- lift getQualContext
+    div_ [ class_ "kind signature" ] $ " :: " <> renderKind k
+
+renderKind :: (Monad m) => Kind -> HtmlT m ()
+renderKind k = case k of
+    KindVar s -> toHtml s
+    StarKind -> "*"
+    HashKind -> "#"
+    SuperKind -> "BOX"
+    ConstraintKind -> "Constraint"
+    PromotedType q -> toHtml (rawName q)
+    FunKind a b -> renderKind a <> " -> " <> renderKind b
 
 renderExportId :: (Monad m) => String -> HtmlT m ()
 renderExportId = div_ [ class_ "export-id" ] . toHtml
-
-render :: (Render a) => a -> HtmlT Program ()
-render a = do
-    qc <- lift getQualContext
-    p_ $ toHtml $ renderToString 2 qc a
 
 
 renderElem ::

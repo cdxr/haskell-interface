@@ -40,6 +40,7 @@ import qualified Var
 import qualified TyCon
 import qualified Type
 import qualified Kind
+import qualified Class
 
 import qualified Distribution.Text as Cabal
 import qualified Distribution.Package as Cabal
@@ -371,12 +372,11 @@ makeType = go
 
 
 -- | Construct a list of type predicates from a `GHC.PredType`
-makePreds :: GHC.PredType -> LoadModule [Pred]
+makePreds :: GHC.PredType -> LoadModule [Pred Interface.Type]
 makePreds pt = case Type.classifyPredType pt of
-    Type.ClassPred cls ts ->
-        sequence
-            [ Interface.ClassPred (makeQualName $ GHC.getName cls)
-                <$> mapM makeType ts ]
+    Type.ClassPred cls ts -> do
+        let clsType = makeClassType cls
+        sequence [ Interface.ClassPred . (clsType :) <$> mapM makeType ts ]
     Type.EqPred rel a b ->
         sequence
             [ Interface.EqPred (makeEqRel rel) <$> makeType a <*> makeType b ]
@@ -389,6 +389,9 @@ makePreds pt = case Type.classifyPredType pt of
         Type.NomEq  -> Interface.NomEq
         Type.ReprEq -> Interface.ReprEq
 
+
+makeClassType :: GHC.Class -> Interface.Type
+makeClassType = Con . makeQualName . GHC.getName
 
 -- | Construct a `TypeCon` to be included in a `ModuleInterface`, and add it
 -- to the `TypeEnv` when it originates in the current module.

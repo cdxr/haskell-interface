@@ -153,10 +153,10 @@ formatOrigin o = case o of
     showLoc (SrcLoc l c) = show l ++ ":" ++ show c
 
 
-formatPred :: Pred -> RDoc
+formatPred :: (Render a) => Pred a -> RDoc
 formatPred p = case p of
-    ClassPred q ts -> combine hsep $ qual q : map doc ts
-    EqPred{} -> text' (show p)  -- TODO
+    ClassPred ts -> combine hsep $ map doc ts
+    EqPred{} -> undefined --text' (show p)  -- TODO
 
 
 

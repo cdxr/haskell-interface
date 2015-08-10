@@ -29,6 +29,7 @@ library
     Data.Interface.Type.Diff
     Data.Interface.Type.Env
     Data.Interface.Type.Build
+    Data.Interface.Type.Render
     Data.Interface.Module
     Data.Interface.Module.Interface
     Data.Interface.Module.Diff

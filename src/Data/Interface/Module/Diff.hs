@@ -75,7 +75,6 @@ lookupExportElem e mdiff =
     n = extractSetElem e
 
 
-
 isLocalElemChange ::
     Elem (Change (Qual a)) (Qual a) ->
     ModuleDiff ->
@@ -83,87 +82,9 @@ isLocalElemChange ::
 isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e
 
 
-
-
-
-{-
-data ExportDiff
-    = LocalValueDiff (Named ValueDeclDiff)          -- a ValueDeclDiff
-    | LocalTypeDiff (Named TypeDeclDiff)            -- a TypeDeclDiff
-    | ExportDiff (Change Export)                    -- none of the above
-    deriving (Show, Eq, Ord)
-
-
-exportNoDiff :: Export -> ExportDiff
-exportNoDiff e = case e of
-    LocalValue vd -> LocalValueDiff $ mapNamed noDiff vd
-    LocalType  td -> LocalTypeDiff  $ mapNamed noDiff td
-    ReExport{} -> ExportDiff $ NoChange e
-
-
-exportDiffChange :: ExportDiff -> Change Export
-exportDiffChange ediff = case ediff of
-    LocalValueDiff vd -> LocalValue <$> traverse toChange vd
-    LocalTypeDiff td  -> LocalType <$> traverse toChange td
-    ExportDiff c      -> c
-
-
-diffModuleExports :: ModuleDiff -> [Elem ExportDiff Export]
-diffModuleExports mdiff = map go . ordSetDiffElems $ diffModuleExportList mdiff
-  where
-    go :: SetElem ExportName -> Elem ExportDiff Export
-    go e = first makeExportDiff $ lookupExportElem e mdiff
-
-    makeExportDiff :: Change Export -> ExportDiff
-    makeExportDiff c = case c of
-        NoChange e ->           -- this is only possible if  @isSame mdiff@
-            ExportDiff $ NoChange e
-        Change (LocalValue vd0) (LocalValue vd1)
-            | Just valDiff <- mergeNamedMatch diff vd0 vd1 ->
-                LocalValueDiff valDiff
-        Change (LocalType td0) (LocalType td1)
-            | Just typeDiff <- mergeNamedMatch diff td0 td1 ->
-                LocalTypeDiff typeDiff
-        _ -> ExportDiff c
--}
-
 diffModuleExports :: ModuleDiff -> [ExportElem]
 diffModuleExports mdiff =
     map exportElem . ordSetDiffElems $ diffModuleExportList mdiff
   where
     exportElem :: SetElem ExportName -> ExportElem
     exportElem e = lookupExportElem e mdiff
-
-
-
-{-
-data ExportDiffSummary = ExportDiffSummary
-    { removedExports   :: Set Export
-    , addedExports     :: Set Export
-    , unchangedExports :: Set Export
-    , changedExports   :: Set ExportDiff
-    } deriving (Show, Eq, Ord)
-
-instance Monoid ExportDiffSummary where
-    mempty = ExportDiffSummary Set.empty Set.empty Set.empty Set.empty
-    mappend a b = ExportDiffSummary
-        { removedExports   = on Set.union removedExports a b
-        , addedExports     = on Set.union addedExports a b
-        , unchangedExports = on Set.union unchangedExports a b
-        , changedExports   = on Set.union changedExports a b
-        }
-
--- TODO: make ExportDiff an instance of `Diff Export`, simplifying the
---  Elem case below.
-singleExportDiff :: Elem ExportDiff Export -> ExportDiffSummary
-singleExportDiff el = case el of
-    Removed e  -> mempty { removedExports = Set.singleton e }
-    Added e    -> mempty { addedExports   = Set.singleton e }
-    Elem ediff -> case exportDiffChange ediff of
-        NoChange e -> mempty { unchangedExports = Set.singleton e }
-        Change{} ->   mempty { changedExports = Set.singleton ediff }
-
-diffExportSummary :: ModuleDiff -> ExportDiffSummary
-diffExportSummary = foldMap singleExportDiff . diffModuleExports
--}
-
