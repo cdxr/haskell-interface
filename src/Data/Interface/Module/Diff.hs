@@ -2,27 +2,27 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Interface.ModuleDiff where
+module Data.Interface.Module.Diff where
 
 import Data.Function ( on )
-import Data.Bifunctor ( first )
 
 import Data.Set ( Set )
-import qualified Data.Set  as Set
 
 import Data.Interface.Source ( Origin )
-import Data.Interface.Module
 import Data.Interface.Name
 import Data.Interface.Name.Map
 import Data.Interface.Change
 import Data.Interface.Change.OrdSet
 import Data.Interface.Type
-import Data.Interface.Type.Diff
+
+import Data.Interface.Module.Interface
+import Data.Interface.Module.Entity
+import Data.Interface.Module.Export
 
 
 -- | A record of all changes and non-changes to a `ModuleInterface`.
--- This contains enough information to recover the `ModuleInterface` from
--- before or after the changes.
+-- This structure contains enough information to recover the `ModuleInterface`
+-- from before or after the changes.
 --
 data ModuleDiff = ModuleDiff
     { diffModuleName       :: Change ModuleName
@@ -35,6 +35,16 @@ data ModuleDiff = ModuleDiff
     }
 
 instance Diff ModuleInterface ModuleDiff where
+    noDiff iface = ModuleDiff
+        { diffModuleName       = noDiff $ moduleName iface
+        , diffModuleTypeCons   = noDiff $ moduleTypeCons iface
+        , diffModuleValueDecls = noDiff $ moduleValueDecls iface
+        , diffModuleTypeDecls  = noDiff $ moduleTypeDecls iface
+        , diffModuleExportList = noDiff $ moduleExportList iface
+        , diffModuleInstances  = noDiff $ moduleInstances iface
+        , diffModuleOrigins    = noDiff $ moduleOrigins iface
+        }
+
     diff a b = ModuleDiff
         { diffModuleName       = on diff moduleName a b
         , diffModuleTypeCons   = on diff moduleTypeCons a b
@@ -56,36 +66,39 @@ instance Diff ModuleInterface ModuleDiff where
             <*> toChange (diffModuleOrigins mdiff)
 
 
-
-data ValueDeclDiff = ValueDeclDiff
-    { vdTypeDiff :: TypeDiff
-    , vdInfoDiff :: Change ValueDeclInfo
-    } deriving (Show, Eq, Ord)
-
-instance Diff ValueDecl ValueDeclDiff where
-    diff (ValueDecl ta ia) (ValueDecl tb ib) =
-        ValueDeclDiff (diff ta tb) (diff ia ib)
-
-    toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
+lookupExportElem :: SetElem ExportName -> ModuleDiff -> ExportElem
+--    SetElem ExportName -> ModuleDiff -> Elem (Change Export) Export
+lookupExportElem e mdiff =
+    Named (rawName n) $ fromElemChange $ mapElem unName x
+  where
+    x = (unsafeFindExport <$> toChange mdiff) `applyChange` setElemChange e
+    n = extractSetElem e
 
 
-data TypeDeclDiff = TypeDeclDiff
-    { tdKindDiff :: Change Kind
-    , tdInfoDiff :: Change TypeDeclInfo
-    } deriving (Show, Eq, Ord)
 
-instance Diff TypeDecl TypeDeclDiff where
-    diff (TypeDecl ka ia) (TypeDecl kb ib) =
-        TypeDeclDiff (diff ka kb) (diff ia ib)
-
-    toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
+isLocalElemChange ::
+    Elem (Change (Qual a)) (Qual a) ->
+    ModuleDiff ->
+    Elem (Change Bool) Bool
+isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e
 
 
+
+
+
+{-
 data ExportDiff
     = LocalValueDiff (Named ValueDeclDiff)          -- a ValueDeclDiff
     | LocalTypeDiff (Named TypeDeclDiff)            -- a TypeDeclDiff
     | ExportDiff (Change Export)                    -- none of the above
     deriving (Show, Eq, Ord)
+
+
+exportNoDiff :: Export -> ExportDiff
+exportNoDiff e = case e of
+    LocalValue vd -> LocalValueDiff $ mapNamed noDiff vd
+    LocalType  td -> LocalTypeDiff  $ mapNamed noDiff td
+    ReExport{} -> ExportDiff $ NoChange e
 
 
 exportDiffChange :: ExportDiff -> Change Export
@@ -112,19 +125,14 @@ diffModuleExports mdiff = map go . ordSetDiffElems $ diffModuleExportList mdiff
             | Just typeDiff <- mergeNamedMatch diff td0 td1 ->
                 LocalTypeDiff typeDiff
         _ -> ExportDiff c
+-}
 
-
-
-lookupExportElem ::
-    SetElem ExportName -> ModuleDiff -> Elem (Change Export) Export
-lookupExportElem e mdiff =
-    fmap unsafeFindExport (toChange mdiff) `applyChange` setElemChange e
-
-isLocalElemChange ::
-    Elem (Change (Qual a)) (Qual a) ->
-    ModuleDiff ->
-    Elem (Change Bool) Bool
-isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e
+diffModuleExports :: ModuleDiff -> [ExportElem]
+diffModuleExports mdiff =
+    map exportElem . ordSetDiffElems $ diffModuleExportList mdiff
+  where
+    exportElem :: SetElem ExportName -> ExportElem
+    exportElem e = lookupExportElem e mdiff
 
 
 
@@ -158,3 +166,4 @@ singleExportDiff el = case el of
 diffExportSummary :: ModuleDiff -> ExportDiffSummary
 diffExportSummary = foldMap singleExportDiff . diffModuleExports
 -}
+

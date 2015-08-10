@@ -21,12 +21,11 @@ import qualified Data.Map as Map
 
 import Distribution.Text
 import Distribution.Package as C
-import qualified Distribution.License as C
+--import qualified Distribution.License as C
 
-import Data.Interface.Name ( ModuleName )
 import Data.Interface.Change
+
 import Data.Interface.Module
-import Data.Interface.ModuleDiff
 
 
 type ModuleEnv = Map ModuleName ModuleInterface
@@ -49,8 +48,8 @@ data PackageInterface = PackageInterface
        visible in exposed modules.
 -}
 
-showPackageId :: PackageInterface -> String
-showPackageId = display . pkgId
+showPackageId :: PackageId -> String
+showPackageId = display
 
 
 data PackageDiff = PackageDiff

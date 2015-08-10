@@ -21,7 +21,7 @@ printPackageInterface :: PackageInterface -> Program ()
 printPackageInterface iface = do
     outputLine $ unlines
         [ "\n*** Package: ***\n"
-        , showPackageId iface
+        , showPackageId (pkgId iface)
         , "\nExposed modules:"
         ]
 
@@ -52,7 +52,8 @@ printModuleDiff (t0, t1) mdiff = do
         , "************************************"
         ]
 
-    mapM_ render (diffModuleExports mdiff)
+    undefined  -- TODO
+    --mapM_ render (diffModuleExports mdiff)
 
 
 outputLine :: String -> Program ()

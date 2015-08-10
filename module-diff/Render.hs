@@ -161,10 +161,11 @@ formatPred p = case p of
 
 
 instance Render Export where
-    doc e = case e of
-        LocalValue vd -> namedDoc vd
-        LocalType td  -> namedDoc td
-        ReExport q    -> renderReExport q
+    doc (Named n e) = case e of
+        LocalValue vd -> namedDoc $ Named n vd
+        LocalType td  -> namedDoc $ Named n td
+        ReExport m _ns ->
+            qual (Qual m n) <> style (indent 2) (text' "(re-export)")
 
 
 renderIfChanged :: (Diff a c, Render c) => c -> RDoc
@@ -220,8 +221,6 @@ instance Render TypeDeclInfo where
             text' "[class]"
 
 
-
-
 instance Render Kind where
     doc k = case k of
         KindVar s -> text' s
@@ -232,17 +231,13 @@ instance Render Kind where
         PromotedType q -> qual q
         FunKind a b -> doc a <+> text' "->" </> doc b
 
-
-
+{-
 instance Render ExportDiff where
     doc ed = case ed of
         LocalValueDiff dv -> namedDoc dv
         LocalTypeDiff dt -> namedDoc dt
         ExportDiff c -> doc c
-
-renderReExport :: Qual SomeName -> RDoc
-renderReExport q =
-    qual (fmap rawName q) <> style (indent 2) (text' "(re-export)")
+-}
         
 
 -- TODO: make ExportDiff an instance of Diff:

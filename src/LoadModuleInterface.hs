@@ -16,7 +16,6 @@ where
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
-import Control.Monad.IO.Class
 
 import qualified Data.Map as Map
 
@@ -47,8 +46,6 @@ import qualified Distribution.Package as Cabal
 
 import Data.Interface as Interface
 import Data.Interface.Type.Build as Build
-
-import Debug.Trace
 
 
 -- | A package key stored in the same format as a GHC.PackageKey
@@ -101,10 +98,6 @@ instance Show ModuleGoal where
                 showString "TargetFile " . shows fp . showChar ' ' . shows mp
         showModName = showString . GHC.moduleNameString
 
-
-loadInterface :: ModuleGoal -> IO ModuleInterface
-loadInterface = withGhc . makeInterface
-
 makeInterface :: ModuleGoal -> Ghc ModuleInterface
 makeInterface g = case g of
     SourceGoal tid -> do
@@ -113,14 +106,6 @@ makeInterface g = case g of
             moduleInterfacesForTargets [Target tid obj_allowed Nothing]
     ModuleGoal modName mPkgKey -> do
         packageModuleInterface modName mPkgKey
-
-{-
-data ModuleGoal = ModuleGoal GHC.ModuleName (Maybe GHC.PackageKey)
-    deriving (Eq, Ord)
-
-makeInterface :: ModuleGoal -> Ghc ModuleInterface
-makeInterface (ModuleGoal modIface = 
--}
 
 
 -- | Construct a `ModuleInterface`, given a `ModuleName` and optional
@@ -308,23 +293,24 @@ makeModuleInfoInterface ghcModule modInfo = do
 
 loadExport :: GHC.Name -> LoadModule Export
 loadExport ghcName = do
-    local <- isLocalThing ghcName
+    isLocal <- isLocalThing ghcName
     mTyThing <- liftGHC $ GHC.lookupName ghcName
     case mTyThing of
         Nothing ->
             error $ "loadExport: failed to find name " ++ showQualName q
         Just thing
-            | local ->
-                makeLocalExport thing
+            | isLocal -> makeLocalExport thing
             | otherwise ->
-                pure . ReExport $ SomeName (tyThingNamespace thing) <$> q
+                pure $ makeNamed ghcName $
+                    ReExport (ghcNameModule ghcName) (tyThingNamespace thing)
+--                pure . ReExport $ SomeName (tyThingNamespace thing) <$> q
   where
     q :: Qual RawName
     q = makeQualName ghcName
 
 
 makeLocalExport :: GHC.TyThing -> LoadModule Export
-makeLocalExport thing = case thing of
+makeLocalExport thing = makeNamed thing <$> case thing of
     ACoAxiom{} -> error "makeLocalExport: ACoAxiom unimplemented"
     AnId a ->                                       -- value
         mkValueDecl Identifier <$> makeType (idType a)
@@ -342,15 +328,13 @@ makeLocalExport thing = case thing of
         | otherwise ->                              -- data/newtype/other
             mkTypeDecl tyCon $ Interface.DataType (makeDataConList tyCon)
   where
-    thingName = GHC.getName thing
+    mkValueDecl :: ValueDeclInfo -> Interface.Type -> Entity
+    mkValueDecl i t = LocalValue $ ValueDecl t i
 
-    mkValueDecl :: ValueDeclInfo -> Interface.Type -> Export
-    mkValueDecl i t = LocalValue $ makeNamed thingName $ ValueDecl t i
-
-    mkTypeDecl :: GHC.TyCon -> TypeDeclInfo -> LoadModule Export
+    mkTypeDecl :: GHC.TyCon -> TypeDeclInfo -> LoadModule Entity
     mkTypeDecl tyCon info =
         let kind = makeKind $ TyCon.tyConKind tyCon
-        in pure $ LocalType $ makeNamed thingName $ TypeDecl kind info
+        in pure $ LocalType $ TypeDecl kind info
 
     makeDataFields :: GHC.DataCon -> [DataField]
     makeDataFields = map mkField . dataConFieldLabels

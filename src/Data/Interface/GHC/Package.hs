@@ -21,7 +21,6 @@ import Distribution.Simple.Compiler ( PackageDB(..) )
 import Data.Interface.Package as Interface
 
 
-
 data PackageEnv = PackageEnv
     { programDB    :: Cabal.ProgramDb
     , packageDBRef :: IORef (Map PackageDB InstalledPackageIndex)

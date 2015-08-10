@@ -29,6 +29,7 @@ import GHC
 import DynFlags
 import qualified Outputable as Out
 import qualified Packages as GHC
+import qualified Linker as GHC ( linkPackages )
 
 import Distribution.Text as Cabal
 import Distribution.Package as Cabal
@@ -69,11 +70,11 @@ makePackageInterface lp@(LocPackage _ ipi) = do
 ghcLocPackage :: LocPackage -> Ghc ()
 ghcLocPackage (LocPackage db ipi) = do
     dflags0 <- getSessionDynFlags
-    _pkgKeys <- setSessionDynFlags dflags0
+    pkgKeys <- setSessionDynFlags dflags0
             { extraPkgConfs = (toPkgConfRef db :)
-            , packageFlags = [ ExposePackage (pkgKeyArg ipi) modRenaming ]
+            , packageFlags = [ ExposePackage (pkgArg ipi) modRenaming ]
             }
-    --liftIO $ GHC.linkPackages dflags pkgKeys
+    liftIO $ GHC.linkPackages dflags0 pkgKeys
 
     return ()
   where
@@ -83,10 +84,10 @@ ghcLocPackage (LocPackage db ipi) = do
         UserPackageDB        -> UserPkgConf
         SpecificPackageDB fp -> PkgConfFile fp
 
-    pkgKeyArg :: InstalledPackageInfo -> PackageArg
-    pkgKeyArg = PackageKeyArg . Cabal.display . packageKey
+    pkgArg :: InstalledPackageInfo -> PackageArg
+    pkgArg = PackageIdArg . Cabal.display . Cabal.installedPackageId
 
-    modRenaming = ModRenaming False []  -- TODO
+    modRenaming = ModRenaming True []  -- TODO
 
 
 debugPackageFlags :: Ghc ()

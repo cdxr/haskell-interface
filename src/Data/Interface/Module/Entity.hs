@@ -1,27 +1,48 @@
-{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds #-}
 
-{-| Types for top-level declarations.
--}
-module Data.Interface.Module.Decl
- (
-    ValueDecl(..)
-  , ValueDeclInfo(..)
-  , DataField
+module Data.Interface.Module.Entity where
 
-  , Kind
-  , TypeDecl(..)
-  , TypeDeclInfo(..)
-  , DataConList(..)
- )
-where
-
+import Data.Interface.Change
 import Data.Interface.Name
 import Data.Interface.Type
+import Data.Interface.Type.Diff
 
 
--- TODO: add `Origin` field to ValueDecl and TypeDecl
+-- | A top-level exported entity in a module, without a name.
+data Entity
+    = LocalValue ValueDecl           -- ^ a value-namespace declaration
+    | LocalType TypeDecl             -- ^ a type-namespace declaration
+    | ReExport ModuleName Namespace  -- ^ module and namespace of declaration
+    deriving (Show, Eq, Ord)
 
+
+data EntityDiff
+    = LocalValueDiff ValueDeclDiff  -- ^ a value-namespace diff
+    | LocalTypeDiff TypeDeclDiff    -- ^ a type-namespace diff
+    | EntityDiff (Change Entity)    -- ^ none of the above
+    deriving (Show, Eq, Ord)
+
+
+instance Diff Entity EntityDiff where
+    noDiff e = case e of
+        LocalValue vd -> LocalValueDiff (noDiff vd)
+        LocalType td -> LocalTypeDiff (noDiff td)
+        ReExport{} -> EntityDiff (NoChange e) 
+
+    diff a b = case (a,b) of
+        (LocalValue vd0, LocalValue vd1) -> LocalValueDiff (diff vd0 vd1)
+        (LocalType td0, LocalType td1)   -> LocalTypeDiff (diff td0 td1)
+        _ -> EntityDiff (Change a b)
+
+    toChange ediff = case ediff of
+        LocalValueDiff vd -> LocalValue <$> toChange vd
+        LocalTypeDiff td -> LocalType <$> toChange td
+        EntityDiff c -> c
+
+
+-- * ValueDecl
 
 data ValueDecl = ValueDecl
     { vdType   :: Type
@@ -51,6 +72,21 @@ instance TraverseNames ValueDeclInfo where
         DataCon fields -> DataCon <$> traverse (traverseNames f) fields
         _ -> pure vdi
 
+
+data ValueDeclDiff = ValueDeclDiff
+    { vdTypeDiff :: TypeDiff
+    , vdInfoDiff :: Change ValueDeclInfo
+    } deriving (Show, Eq, Ord)
+
+instance Diff ValueDecl ValueDeclDiff where
+    diff (ValueDecl ta ia) (ValueDecl tb ib) =
+        ValueDeclDiff (diff ta tb) (diff ia ib)
+
+    toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
+
+
+
+-- * TypeDecl
 
 data TypeDecl = TypeDecl
     { tdKind   :: Kind
@@ -96,3 +132,16 @@ instance TraverseNames DataConList where
     traverseNames f dcons = case dcons of
         Abstract -> pure Abstract
         DataConList ns -> DataConList <$> traverse (traverseNames f) ns
+
+
+data TypeDeclDiff = TypeDeclDiff
+    { tdKindDiff :: Change Kind
+    , tdInfoDiff :: Change TypeDeclInfo
+    } deriving (Show, Eq, Ord)
+
+instance Diff TypeDecl TypeDeclDiff where
+    diff (TypeDecl ka ia) (TypeDecl kb ib) =
+        TypeDeclDiff (diff ka kb) (diff ia ib)
+
+    toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
+

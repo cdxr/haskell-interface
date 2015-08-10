@@ -1,11 +1,50 @@
 module Data.Interface.Module.Export where
 
-
+import Data.Interface.Change
 import Data.Maybe ( catMaybes )
 
 import Data.Interface.Name
+import Data.Interface.Module.Entity
 
-import Data.Interface.Module.Decl
+
+-- | A single entry in an export list
+type Export = Named Entity
+
+-- | A removal, addition, change, or non-change to an `Export`
+type ExportElem = Named (Elem EntityDiff Entity)
+
+
+exportName :: Export -> ExportName
+exportName (Named n e) = case e of
+    ReExport m ns -> ForeignName $ Qual m (SomeName ns n)
+    LocalValue{}  -> LocalName $ SomeName Values n
+    LocalType{}   -> LocalName $ SomeName Types n
+
+exportValueDecl :: Export -> Maybe (Named ValueDecl)
+exportValueDecl (Named n e) = case e of
+    LocalValue vd -> Just (Named n vd)
+    _             -> Nothing
+
+exportTypeDecl :: Export -> Maybe (Named TypeDecl)
+exportTypeDecl (Named n e) = case e of
+    LocalType td -> Just (Named n td)
+    _            -> Nothing
+
+exportReExport :: Export -> Maybe (Qual SomeName)
+exportReExport (Named n e) = case e of
+    ReExport m ns -> Just $ Qual m (SomeName ns n)
+    _             -> Nothing
+
+
+-- | Produce a triple containing a list of all export names, a list of all
+-- value declarations, and a list of all type declarations.
+splitExports :: [Export] -> ([ExportName], [Named ValueDecl], [Named TypeDecl])
+splitExports es =
+    let (names, mvals, mtypes) = unzip3 $ map makeTup es
+    in (names, catMaybes mvals, catMaybes mtypes)
+  where
+    makeTup e = (exportName e, exportValueDecl e, exportTypeDecl e)
+
 
 
 data ExportName
@@ -33,7 +72,7 @@ instance TraverseNames ExportName where
         ForeignName q -> ForeignName <$> traverseNames f q
 
 
-
+{-
 data Export
     = LocalValue (Named ValueDecl)
     | LocalType (Named TypeDecl)
@@ -46,18 +85,4 @@ exportName e = case e of
     LocalType n  -> LocalName (someName n)
     ReExport q   -> ForeignName q
 
-
--- | Produce a triple containing a list of all export names, a list of all
--- value declarations, and a list of all type declarations.
-splitExports ::
-    [Export] ->
-    ([ExportName], [Named ValueDecl], [Named TypeDecl])
-splitExports es =
-    let (names, mvals, mtypes) = unzip3 $ map makeTup es
-    in (names, catMaybes mvals, catMaybes mtypes)
-  where
-    makeTup e = case e of
-        LocalValue a -> (exportName e, Just a, Nothing)
-        LocalType a  -> (exportName e, Nothing, Just a)
-        ReExport{}   -> (exportName e, Nothing, Nothing)
-
+-}

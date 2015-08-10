@@ -11,6 +11,7 @@
 module Data.Interface.Change where
 
 import Data.Bifunctor
+import Data.Foldable ( toList )
 
 import Data.Functor.Classes
 
@@ -191,12 +192,25 @@ isElemChanged e = case e of
 toElemChange :: (Diff a c) => Elem c a -> Elem (Change a) a
 toElemChange = first toChange
 
+fromElemChange :: (Diff a c) => Elem (Change a) a -> Elem c a
+fromElemChange = first fromChange
+
+mapElem :: (Diff a c) => (a -> b) -> Elem c a -> Elem (Change b) b
+mapElem f = bimap (fmap f . toChange) f
 
 applyChange :: Change (a -> b) -> Elem (Change a) a -> Elem (Change b) b
 applyChange c e = case e of
     Removed a -> Removed $ old c a
     Added b   -> Added $ new c b
     Elem cx   -> Elem $ c <*> cx
+
+
+instance Bifunctor Elem where
+    bimap f g e = case e of
+        Removed a -> Removed (g a)
+        Added a   -> Added (g a)
+        Elem c    -> Elem (f c)
+
 
 
 -- | @SetElem a@ represents an element of type @a@ that may have been added
@@ -206,7 +220,7 @@ type SetElem a = Elem (Same a) a
 extractSetElem :: SetElem a -> a
 extractSetElem e = case e of
     Removed a     -> a
-    Added b       -> b
+    Added a       -> a
     Elem (Same a) -> a
 
 mapSetElem :: (a -> b) -> SetElem a -> SetElem b
@@ -221,13 +235,6 @@ setElemChange = first (NoChange . getSame)
 -- This is named for the class instance @Diff a (Change a)@, which uses the
 -- notion of equality provided by `Eq`.
 type ElemEq a = Elem (Change a) a
-
-instance Bifunctor Elem where
-    bimap f g e = case e of
-        Removed a -> Removed (g a)
-        Added a   -> Added (g a)
-        Elem c    -> Elem (f c)
-
 
 diffMaybe :: (Diff a c) => Maybe a -> Maybe a -> Maybe (Elem c a)
 diffMaybe Nothing Nothing = Nothing
@@ -279,6 +286,11 @@ instance (Show1 f, Show c, Show a) => Show (ElemChanges f c a) where
             showString "NoElemChanges " . showsPrec1 11 fa
         ElemChanges fe ->
             showString "ElemChanges " . showsPrec1 11 fe
+
+elemList :: (Diff a c, Foldable f) => ElemChanges f c a -> [Elem c a]
+elemList ec = case ec of
+    NoElemChanges as -> map (Elem . noDiff) (toList as)
+    ElemChanges es   -> toList es
 
 
 transElemChanges ::

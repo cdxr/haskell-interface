@@ -30,9 +30,10 @@ library
     Data.Interface.Type.Env
     Data.Interface.Type.Build
     Data.Interface.Module
-    Data.Interface.Module.Decl
+    Data.Interface.Module.Interface
+    Data.Interface.Module.Diff
+    Data.Interface.Module.Entity
     Data.Interface.Module.Export
-    Data.Interface.ModuleDiff
     Data.Interface.Package
   -- other-modules:
   -- other-extensions:

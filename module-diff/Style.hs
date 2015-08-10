@@ -28,7 +28,7 @@ mainStyle = do
 
     byClass "export-id" & fontWeight bold
 
-    ul # byClass "export-list" ? do
+    byClass "export-list" & do
         listStyleType none
         padding nil (em 1) nil (em 1)
 
@@ -37,7 +37,7 @@ mainStyle = do
             lineHeight (pct 200)
             borderBottom solid 2 "#eee"
 
-    ul # byClass "change" ? do
+    byClass "change" & do
         listStyleType none
         paddingLeft nil
 
@@ -51,8 +51,7 @@ mainStyle = do
             color additionColor
 
     -- TODO: all "decl" properties should be indented
-    byClass "decl-signature" & marginLeft (em 2)
-        
+    byClass "signature" & marginLeft (em 2)
         
 
 additionColor :: Color
