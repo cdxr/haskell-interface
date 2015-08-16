@@ -69,7 +69,16 @@ renderPackagePage :: PackageInterface -> HtmlT Program ()
 renderPackagePage iface = do
     let title = showPackageId (pkgId iface)
     simplePage title $
-        renderModuleGroup . toList $ pkgExposedModules iface
+        div_ [ class_ "package" ] $
+            renderModuleGroup . toList $ pkgExposedModules iface
+
+renderPackageDiffPage :: PackageDiff -> HtmlT Program ()
+renderPackageDiffPage pdiff = do
+    let title = showChange " / " showPackageId $ diffPkgId pdiff
+    simplePage title $
+        div_ [ class_ "package" ] $
+            renderPackageDiff pdiff
+
 
 
 createLink ::
@@ -83,26 +92,18 @@ createLink uniqueId link content = (linkHtml, contentHtml)
     linkHtml = a_ [ href_ (Text.pack "#" <> uniqueId) ] link
     contentHtml = with content [ id_ uniqueId ]
 
-createTextLink ::
+
+simpleLinkList ::
     (Monad m) =>
-    (a -> Text) ->               -- ^ create unique id
-    (a -> String) ->             -- ^ create link text
-    (a -> HtmlT m b) ->          -- ^ create content
-    a -> (HtmlT m (), HtmlT m b)
-createTextLink mkId mkText mkContent a =
-    createLink (mkId a) (toHtml $ mkText a) (mkContent a)
-
-
-simpleLinkList :: (Monad m) =>
     (a -> Text) ->
-    (a -> String) ->
     (a -> HtmlT m b) ->
+    (a -> HtmlT m c) ->
     [a] -> HtmlT m ()
-simpleLinkList mkId mkText mkContent xs = do
+simpleLinkList mkId mkLink mkContent xs = do
     let (links, sections) =
-            unzip $ map (createTextLink mkId mkText mkContent) xs
+            unzip [ createLink (mkId x) (mkLink x) (mkContent x) | x <- xs ]
 
-    ul_ [ class_ "links" ] $ mapM_ (li_ [ class_ "link" ]) links
+    ol_ [ class_ "links" ] $ mapM_ (li_ [ class_ "link" ]) links
 
     div_ $ sequence_ sections
 
@@ -125,20 +126,14 @@ renderModuleDiffPage t0 t1 mdiff =
           | otherwise = name0 ++ " / " ++ name1 ++ " (module comparison)"
 
 
-renderPackageDiffPage :: PackageDiff -> HtmlT Program ()
-renderPackageDiffPage pdiff = simplePage title (renderPackageDiff pdiff)
-  where
-    title = showChange " / " showPackageId $ diffPkgId pdiff
-
-
 renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
-renderModuleGroup = simpleLinkList makeId makeLinkText renderModuleInterface
+renderModuleGroup = simpleLinkList makeId makeLink renderModuleInterface
   where
     makeId :: ModuleInterface -> Text
     makeId = moduleNameElemId . moduleName
 
-    makeLinkText :: ModuleInterface -> String
-    makeLinkText = moduleName
+    makeLink :: (Monad m) => ModuleInterface -> HtmlT m ()
+    makeLink = toHtml . moduleName
 
 
 -- | Format a `ModuleName` as a legal html element id.
@@ -158,11 +153,15 @@ renderModuleDiffGroup = simpleLinkList makeId makeLinkText render
         Added m   -> "added-" <> moduleNameElemId (moduleName m)
         Elem c    -> Text.pack $ new $ diffModuleName c
 
-    makeLinkText :: Elem ModuleDiff ModuleInterface -> String
+    makeLinkText :: (Monad m) => Elem ModuleDiff ModuleInterface -> HtmlT m ()
     makeLinkText e = case e of
-        Removed m -> moduleName m ++ "  (removed)"
-        Added m   -> moduleName m ++ "  (new)"
-        Elem c -> showChange " => " id $ diffModuleName c
+        Removed m -> span_ [ class_ "removed" ] $ toHtml $ moduleName m
+        Added m   -> span_ [ class_ "added" ] $ toHtml $ moduleName m
+        Elem c -> span_ [ class_ cls ] $
+                    toHtml $ showChange " => " id (diffModuleName c)
+          where
+            cls | isElemChanged e = "change"
+                | otherwise       = "no-change"
 
     render :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
     render = renderElem_ renderModuleInterface renderModuleDiff

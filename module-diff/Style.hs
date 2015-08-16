@@ -33,6 +33,9 @@ mainStyle = do
         highlightChange
         color additionColor
 
+    ".package" & do
+        star # ".links" <? listStyleType none
+
     ".export-list" & do
         listStyleType none
         padding nil (em 1) nil (em 1)
