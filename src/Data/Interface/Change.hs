@@ -18,6 +18,8 @@ import Data.Functor.Classes
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
+import qualified Data.Algorithm.Patience as Patience
+
 
 -- | @Change a@ represents an "old" value of @a@ paired with a corresponding
 -- "new" value of @a@. There is a distinguished constructor for when these
@@ -97,9 +99,44 @@ getSame (Same a) = a
 {-# INLINABLE getSame #-}
 
 
--- | Class for any type @c@ that represents a pair of values of type @a@,
--- where one value is considered an updated or more recent version of the
--- other.
+-- | An instance @ToChange a c@ is for any type @c@ that represents a pair of
+-- values of type @a@, in which one value is considered an updated or more
+-- recent version of the other.
+--
+-- @isChanged = isChanged . toChange@
+--
+class ToChange a c | c -> a where
+    toChange :: c -> Change a
+
+    isChanged :: c -> Bool
+    isChanged c = case toChange c of
+        NoChange{} -> False
+        Change{}   -> True
+
+    {-# MINIMAL toChange #-}
+
+-- | @toReplace c@ is the @Replace@ containing the pair of values in @c@, which
+-- has forgotten whether the values are the same.
+toReplace :: (ToChange a c) => c -> Replace a
+toReplace c = case toChange c of
+    NoChange a -> Replace a a
+    Change a b -> Replace a b
+{-# INLINABLE toReplace #-}
+
+isNotChanged :: (ToChange a c) => c -> Bool
+isNotChanged = not . isChanged
+{-# INLINABLE isNotChanged #-}
+
+getNoDiff :: (ToChange a c) => c -> Maybe a
+getNoDiff c = case toChange c of
+    NoChange a -> Just a
+    _          -> Nothing
+
+
+
+-- | An instance @Diff a c@ is for a type @c@ with an instance of
+-- @ToChange a c@ that admits a canonical function `diff` for producing a
+-- @c@ from two @a@s.
 --
 -- @
 -- noDiff a = diff a a
@@ -115,36 +152,29 @@ getSame (Same a) = a
 --
 -- @isChanged = isChanged . toChange@
 --
-class Diff a c | c -> a where
-    toChange :: c -> Change a
+class (ToChange a c) => Diff a c | c -> a where
     diff :: a -> a -> c
 
     noDiff :: a -> c
     noDiff a = diff a a
     {-# INLINABLE noDiff #-}
 
-    isChanged :: c -> Bool
-    isChanged c = case toChange c of
-        NoChange{} -> False
-        Change{}   -> True
-
-    {-# MINIMAL diff, toChange #-}
+    {-# MINIMAL diff #-}
 
 
 fromChange :: (Diff a c) => Change a -> c
 fromChange = change noDiff diff
 {-# INLINABLE fromChange #-}
 
--- | @toReplace c@ is the @Replace@ containing the pair of values in @c@, which
--- has forgotten whether the values are the same.
-toReplace :: (Diff a c) => c -> Replace a
-toReplace = change pure Replace . toChange
-{-# INLINABLE toReplace #-}
+castDiff :: (ToChange a c, Diff a c') => c -> c'
+castDiff = fromChange . toChange
+{-# INLINABLE castDiff #-}
 
-isSame :: (Diff a c) => c -> Bool
-isSame = not . isChanged
-{-# INLINABLE isSame #-}
 
+
+instance ToChange a (Change a) where
+    toChange = id
+    {-# INLINABLE toChange #-}
 
 instance (Eq a) => Diff a (Change a) where
     diff a b
@@ -153,16 +183,14 @@ instance (Eq a) => Diff a (Change a) where
 
     noDiff = NoChange
 
-    toChange = id
-    {-# INLINABLE toChange #-}
 
+instance ToChange a (Replace a) where
+    toChange (Replace a b) = Change a b
 
 -- | trivial: considers all values to be distinct
 instance Diff a (Replace a) where
     diff = Replace
     noDiff a = Replace a a
-
-    toChange (Replace a b) = Change a b
 
 
 -- | When @c@ represents a change to a value of type @c@, @Elem c a@ is 
@@ -174,6 +202,22 @@ data Elem c a
     deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 
+getRemoved :: Elem c a -> Maybe a
+getRemoved e = case e of
+    Removed a -> Just a
+    _         -> Nothing
+
+getAdded :: Elem c a -> Maybe a
+getAdded e = case e of
+    Added a -> Just a
+    _         -> Nothing
+
+getElem :: Elem c a -> Maybe c
+getElem e = case e of
+    Elem c -> Just c
+    _      -> Nothing
+
+
 -- | Analagous to @fromMaybe@. @fromElem x@ is a function that converts an
 -- @Elem c a@ to a @c@ by filling in @x@ for any missing value of type @a@.
 fromElem :: (Diff a c) => a -> Elem c a -> c
@@ -182,21 +226,19 @@ fromElem x e = case e of
     Added b   -> diff x b
     Elem c    -> c
 
-isElemChanged :: (Diff a c) => Elem c a -> Bool
+isElemChanged :: (ToChange a c) => Elem c a -> Bool
 isElemChanged e = case e of
     Removed{} -> True
     Added{}   -> True
     Elem c    -> isChanged c
 
 
-toElemChange :: (Diff a c) => Elem c a -> Elem (Change a) a
-toElemChange = first toChange
+castElem :: (ToChange a c, Diff a c') => Elem c a -> Elem c' a
+castElem = first castDiff
+{-# INLINABLE castElem #-}
 
-fromElemChange :: (Diff a c) => Elem (Change a) a -> Elem c a
-fromElemChange = first fromChange
-
-mapElem :: (Diff a c) => (a -> b) -> Elem c a -> Elem (Change b) b
-mapElem f = bimap (fmap f . toChange) f
+mapElem :: (c -> c') -> Elem c a -> Elem c' a
+mapElem = first
 
 applyChange :: Change (a -> b) -> Elem (Change a) a -> Elem (Change b) b
 applyChange c e = case e of
@@ -302,10 +344,7 @@ transElemChanges nat ec = case ec of
 type MapDiff k = ElemChanges (Map k)
 type MapDiffEq k a = MapDiff k (Change a) a
 
-instance (Ord k, Diff a c) => Diff (Map k a) (MapDiff k c a) where
-    diff = diffMap
-    noDiff = NoElemChanges
-
+instance (Ord k, ToChange a c) => ToChange (Map k a) (MapDiff k c a) where
     toChange d = case d of
         NoElemChanges m -> NoChange m
         ElemChanges m -> Map.foldMapWithKey f m
@@ -314,6 +353,10 @@ instance (Ord k, Diff a c) => Diff (Map k a) (MapDiff k c a) where
                 Removed a -> Change (Map.singleton k a) mempty
                 Added b   -> Change mempty (Map.singleton k b)
                 Elem c    -> fmap (Map.singleton k) (toChange c)
+
+instance (Ord k, Diff a c) => Diff (Map k a) (MapDiff k c a) where
+    diff = diffMap
+    noDiff = NoElemChanges
 
 
 viewMapDiff :: (Diff a c) => MapDiff k c a -> Map k (Elem c a)
@@ -330,3 +373,30 @@ diffMap a b = toMapDiff $ Map.mergeWithKey combine only1 only2 a b
     toMapDiff m
         | any isElemChanged m = ElemChanges m
         | otherwise = NoElemChanges b
+
+
+-- * Patience diff algorithm
+
+data Patience a = Patience { patienceElems' :: [Elem (Replace a) a] }
+    deriving (Show, Eq, Ord)
+
+patienceElems :: Patience a -> [Elem a a]
+patienceElems = map (mapElem mostRecent) . patienceElems'
+  where
+    mostRecent (Replace _ a) = a
+
+instance ToChange [a] (Patience a) where
+    toChange (Patience es) = reverse <$> foldr go (Change [] []) es
+      where
+        go e (Change as bs) = case e of
+            Removed a          -> Change (a:as)  bs
+            Added b            -> Change as     (b:bs)
+            Elem (Replace a b) -> Change (a:as) (b:bs)
+
+instance (Ord a) => Diff [a] (Patience a) where
+    diff as bs = Patience $ map toElem (Patience.diff as bs)
+      where
+        toElem item = case item of
+            Patience.Old a -> Removed a
+            Patience.New b -> Added b
+            Patience.Both a b -> Elem (Replace a b)

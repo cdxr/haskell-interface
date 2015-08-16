@@ -288,6 +288,8 @@ renderTypePrec :: Type -> (Prec, RDoc)
 renderTypePrec = cata renderTypeAlg
 
 renderTypeAlg :: (Render a) => TypeF (Prec, a) -> (Prec, RDoc)
+renderTypeAlg = undefined  -- XXX TODO
+{-
 renderTypeAlg t0 = case t0 of
     VarF (TypeVar s _) -> (ConPrec, text' s)
     ConF q -> (ConPrec, qual q)
@@ -311,6 +313,7 @@ renderTypeAlg t0 = case t0 of
     docPrec prec0 (prec, d)
          | prec <= prec0 = style parens (doc d)
          | otherwise = doc d
+-}
 
 
 renderForall :: [TypeVar] -> Doc
@@ -324,19 +327,15 @@ renderTypeDiffPrec = cata renderTypeDiffAlg
     
 renderTypeDiffAlg :: (Render a) => DiffTypeF Type (Prec, a) -> (Prec, RDoc)
 renderTypeDiffAlg td0 = case td0 of
-    DiffTypeF r -> (,) ConPrec $ replaceDoc (fmap embed r)
+    NoDiffTypeF t -> (ConPrec, doc $ embed t)
+    ReplaceTypeF t0 t1 ->
+        (,) ConPrec $ style braces $
+            style red (doc $ embed t0) <+>
+            text' "/" <+>
+            style green (doc $ embed t1)
     SameTypeF fc -> renderTypeAlg $ fmap (second doc) fc
   where
     replaceDoc :: Replace Type -> RDoc
     replaceDoc (Replace t0 t1) =
         style braces $
             style red (doc t0) <+> text' "/" <+> style green (doc t1)
-
-
-{-
--- TODO
-renderApplySugar :: (Render a) => TypeCon -> TypeF a -> Maybe (Prec, RDoc)
-renderApplySugar con t0 = case rawName con of
-    "[]" -> Just (ConPrec, style brackets $ _ t0)
-    _ -> Nothing
--}

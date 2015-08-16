@@ -14,16 +14,19 @@ import qualified Blaze.ByteString.Builder as Blaze
 import Data.Text ( Text )
 import qualified Data.Text as Text
 
+import Text.Groom
+
 import Data.Interface
 import Data.Interface.Change
+import Data.Interface.Change.View
 import Data.Interface.Type.Render
+import Data.Interface.Type.Diff
 
 import Lucid
 
 import Task
 import Program
 import ProgramArgs
---import Render
 import Style
 
 
@@ -75,10 +78,10 @@ createLink ::
     HtmlT m a ->             -- ^ hyperlink markup
     HtmlT n b ->             -- ^ linked content
     (HtmlT m a, HtmlT n b)
-createLink uniqueId link content =
-    ( a_ [ href_ (Text.pack "#" <> uniqueId) ] link
-    , with content [ id_ uniqueId ]
-    )
+createLink uniqueId link content = (linkHtml, contentHtml)
+  where
+    linkHtml = a_ [ href_ (Text.pack "#" <> uniqueId) ] link
+    contentHtml = with content [ id_ uniqueId ]
 
 createTextLink ::
     (Monad m) =>
@@ -125,10 +128,7 @@ renderModuleDiffPage t0 t1 mdiff =
 renderPackageDiffPage :: PackageDiff -> HtmlT Program ()
 renderPackageDiffPage pdiff = simplePage title (renderPackageDiff pdiff)
   where
-    title = case diffPkgId pdiff of
-        NoChange pid -> showPackageId pid
-        Change a b -> showPackageId a ++ " / " ++ showPackageId b
-
+    title = showChange " / " showPackageId $ diffPkgId pdiff
 
 
 renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
@@ -162,46 +162,49 @@ renderModuleDiffGroup = simpleLinkList makeId makeLinkText render
     makeLinkText e = case e of
         Removed m -> moduleName m ++ "  (removed)"
         Added m   -> moduleName m ++ "  (new)"
-        Elem c -> case diffModuleName c of
-            NoChange n -> n
-            Change a b -> a ++ " / " ++ b
+        Elem c -> showChange " => " id $ diffModuleName c
 
     render :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
     render = renderElem_ renderModuleInterface renderModuleDiff
 
 
-renderModuleInterface :: ModuleInterface -> HtmlT Program ()
-renderModuleInterface iface = do
-    h2_ $ toHtml (moduleName iface)
+-- | Encode an invisible note in Html. The note can provide helpfull debugging
+-- information when attached to an element that is inspected in the browser.
+storeNote :: (Monad m) => String -> HtmlT m ()
+storeNote = div_ [ class_ "note", style_ "display:none;" ] . toHtml
 
-    ul_ [ class_ "export-list" ] $
-        mapM_ (li_ . renderExport) $
-            compileModuleExports iface
+
+renderModuleInterface :: ModuleInterface -> HtmlT Program ()
+renderModuleInterface = renderModuleDiff . noDiff
 
 
 renderModuleDiff :: ModuleDiff -> HtmlT Program ()
 renderModuleDiff mdiff = do
-    h2_ $ toHtml $ case diffModuleName mdiff of
-        NoChange n -> n
-        Change a b -> a ++ " / " ++ b
+    let mc = diffModuleName mdiff
+    h2_ $ toHtml $ showChange " => " id mc
 
     ol_ [ class_ "export-list" ] $
-        mapM_ (li_ . renderExportElem) $
+        mapM_ (li_ . renderExportElem mc) $
             reverse $ diffModuleExports mdiff
 
 
 renderPackageDiff :: PackageDiff -> HtmlT Program ()
 renderPackageDiff = renderModuleDiffGroup . elemList . diffPkgExposedModules
 
-renderExport :: Export -> HtmlT Program ()
-renderExport (Named n e) = renderExportId n <> renderEntity e
+renderExportElem :: Change ModuleName -> ExportElem -> HtmlT Program ()
+renderExportElem mc (Named n e) = do
+    dfn_ [ class_ $ "export-id " <> changeClass ] $
+        abbr_ [ title_ qualName ] $ toHtml n
+    renderElem_ renderEntity renderEntityDiff e
+  where
+    qualName = Text.pack $ showChange " => " showQual mc
+    showQual m = showQualName $ Qual m n
 
-renderExportElem :: ExportElem -> HtmlT Program ()
-renderExportElem (Named n e) =
-    renderExportId n <> renderElem_ renderEntity renderEntityDiff e
+    changeClass | isElemChanged e = "change"
+                | otherwise       = "no-change"
 
 renderEntity :: Entity -> HtmlT Program ()
-renderEntity e = do
+renderEntity e =
     case e of
         LocalValue vd -> renderEntityType (vdType vd)
         LocalType td -> renderEntityKind (tdKind td)
@@ -215,16 +218,44 @@ renderEntity e = do
         Values -> "(value)"
         Types  -> "(type)"
 
+
 renderEntityDiff :: EntityDiff -> HtmlT Program ()
-renderEntityDiff = renderDiff_ renderEntity
+renderEntityDiff ediff = case ediff of
+    LocalValueDiff vd -> renderEntityTypeDiff (vdTypeDiff vd)
+    LocalTypeDiff td  -> renderChange_ renderEntityKind (tdKindDiff td)
+    EntityDiff c -> renderChange_ renderEntity c
+
 
 renderEntityType :: Type -> HtmlT Program ()
-renderEntityType t = do
-    --qc <- lift getQualContext
-    div_ [ class_ "type signature" ] $ " :: " <> renderType t
+renderEntityType = renderEntityTypeDiff . noDiff
 
-renderType :: (Monad m) => Type -> HtmlT m ()
-renderType = renderTypeSig toHtml renderTypeCon . typeSig
+renderEntityTypeDiff :: TypeDiff -> HtmlT Program ()
+renderEntityTypeDiff tdiff = do
+    let diffView :: DiffView (HtmlT Program ())
+        diffView = renderTypeDiff' rc htmlTypeRender tdiff'
+
+        tdiff' = extendTypeDiff tdiff
+
+    case viewCombined diffView of
+        Nothing -> renderChange_ asSignature (viewSeparate diffView)
+        Just m -> asSignature m
+
+    -- hide some notes in the HTML for debugging
+    storeNote $ groom tdiff'
+  where
+    rc :: (Monad m) => RenderCombined (HtmlT m ())
+    rc = Just . renderElem_ id (renderChange_ id . toChange)
+
+    asSignature :: (Monad m) => HtmlT m () -> HtmlT m ()
+    asSignature typeHtml =
+        div_ [ class_ "type signature" ] $ " :: " <> typeHtml
+
+
+htmlTypeRender :: (Monad m) => TypeRender (HtmlT m ())
+htmlTypeRender =
+    (toHtml <$> stringTypeRender)
+        { renderCon = renderTypeCon }
+
 
 renderTypeCon :: (Monad m) => TypeConLink -> HtmlT m ()
 renderTypeCon q =
@@ -247,9 +278,6 @@ renderKind k = case k of
     PromotedType q -> toHtml (rawName q)
     FunKind a b -> renderKind a <> " -> " <> renderKind b
 
-renderExportId :: (Monad m) => String -> HtmlT m ()
-renderExportId = div_ [ class_ "export-id" ] . toHtml
-
 
 renderElem ::
     (Monad m) =>
@@ -257,8 +285,8 @@ renderElem ::
     (c -> HtmlT m c') ->     -- ^ persistent element
     Elem c a -> HtmlT m (Elem c' a')
 renderElem fa fc e = case e of
-    Removed a -> div_ [ class_ "removed" ] (Removed <$> fa a)
-    Added a   -> div_ [ class_ "added" ] (Added <$> fa a)
+    Removed a -> span_ [ class_ "removed" ] (Removed <$> fa a)
+    Added a   -> span_ [ class_ "added" ] (Added <$> fa a)
     Elem c    -> Elem <$> fc c
 
 renderElem_ ::
@@ -283,3 +311,11 @@ renderChange f (Change x y) =
 
 renderChange_ :: (Monad m) => (a -> HtmlT m ()) -> Change a -> HtmlT m ()
 renderChange_ f = void . renderChange f
+
+showChange ::
+    String ->           -- ^ separator
+    (a -> String) ->    -- ^ renderer
+    Change a -> String
+showChange s f c = case c of
+    NoChange a -> f a
+    Change a b -> f a ++ s ++ f b

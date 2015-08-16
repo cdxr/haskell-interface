@@ -80,13 +80,14 @@ ordSetDiffElems (OrdSetDiff os0 os1 osm) = case osm of
 lookupElemIndexDiff :: (Ord a) => a -> OrdSetDiff a -> Maybe (ElemEq Int)
 lookupElemIndexDiff a = Map.lookup a . viewMapDiff . ixmapOrdSet
 
+instance ToChange (OrdSet a) (OrdSetDiff a) where
+    toChange (OrdSetDiff os0 os1 m) = case m of
+        NoElemChanges{} -> NoChange os1
+        ElemChanges{}   -> Change os0 os1
+
 instance (Ord a) => Diff (OrdSet a) (OrdSetDiff a) where
     diff a b = OrdSetDiff a b md
       where
         md = diff (ordSetIndexMap a) (ordSetIndexMap b)
 
     noDiff a = OrdSetDiff a a (noDiff $ ordSetIndexMap a)
-
-    toChange (OrdSetDiff os0 os1 m) = case m of
-        NoElemChanges{} -> NoChange os1
-        ElemChanges{}   -> Change os0 os1

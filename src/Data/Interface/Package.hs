@@ -59,6 +59,13 @@ data PackageDiff = PackageDiff
     , diffPkgHiddenModules  :: MapDiff ModuleName ModuleDiff ModuleInterface
     }
 
+instance ToChange PackageInterface PackageDiff where
+    toChange d =
+        PackageInterface
+            <$> toChange (diffPkgId d)
+            <*> toChange (diffPkgExposedModules d)
+            <*> toChange (diffPkgHiddenModules d)
+
 instance Diff PackageInterface PackageDiff where
     diff a b = PackageDiff
         { diffPkgId             = on diff pkgId a b
@@ -66,12 +73,6 @@ instance Diff PackageInterface PackageDiff where
         , diffPkgExposedModules = on diff pkgExposedModules a b
         , diffPkgHiddenModules  = on diff pkgHiddenModules a b
         }
-
-    toChange d =
-        PackageInterface
-            <$> toChange (diffPkgId d)
-            <*> toChange (diffPkgExposedModules d)
-            <*> toChange (diffPkgHiddenModules d)
 
 
 
@@ -89,5 +90,3 @@ data PackageInfo = PackageInfo
     -- ... etc
     } deriving (Show, Eq)
 -}
- 
-

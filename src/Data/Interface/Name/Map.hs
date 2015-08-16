@@ -166,9 +166,12 @@ instance (Ord n, TraverseNames n, TraverseNames a) =>
 type NameMapDiff' n = ElemChanges (NameMap' n)
 type NameMapDiff = NameMapDiff' RawName
 
+instance (Ord n, ToChange a c) =>
+        ToChange (NameMap' n a) (ElemChanges (NameMap' n) c a) where
+    toChange = coerce . toChange . transElemChanges viewNameMap
+
 instance (Ord n, Diff a c) =>
-            Diff (NameMap' n a) (ElemChanges (NameMap' n) c a) where
+        Diff (NameMap' n a) (ElemChanges (NameMap' n) c a) where
 
     diff a b = transElemChanges NameMap $ diff (viewNameMap a) (viewNameMap b)
     noDiff = NoElemChanges
-    toChange = coerce . toChange . transElemChanges viewNameMap

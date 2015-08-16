@@ -25,6 +25,12 @@ data EntityDiff
     deriving (Show, Eq, Ord)
 
 
+instance ToChange Entity EntityDiff where
+    toChange ediff = case ediff of
+        LocalValueDiff vd -> LocalValue <$> toChange vd
+        LocalTypeDiff td -> LocalType <$> toChange td
+        EntityDiff c -> c
+
 instance Diff Entity EntityDiff where
     noDiff e = case e of
         LocalValue vd -> LocalValueDiff (noDiff vd)
@@ -35,11 +41,6 @@ instance Diff Entity EntityDiff where
         (LocalValue vd0, LocalValue vd1) -> LocalValueDiff (diff vd0 vd1)
         (LocalType td0, LocalType td1)   -> LocalTypeDiff (diff td0 td1)
         _ -> EntityDiff (Change a b)
-
-    toChange ediff = case ediff of
-        LocalValueDiff vd -> LocalValue <$> toChange vd
-        LocalTypeDiff td -> LocalType <$> toChange td
-        EntityDiff c -> c
 
 
 -- * ValueDecl
@@ -78,11 +79,13 @@ data ValueDeclDiff = ValueDeclDiff
     , vdInfoDiff :: Change ValueDeclInfo
     } deriving (Show, Eq, Ord)
 
+
+instance ToChange ValueDecl ValueDeclDiff where
+    toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
+
 instance Diff ValueDecl ValueDeclDiff where
     diff (ValueDecl ta ia) (ValueDecl tb ib) =
         ValueDeclDiff (diff ta tb) (diff ia ib)
-
-    toChange (ValueDeclDiff t i) = ValueDecl <$> toChange t <*> toChange i
 
 
 
@@ -139,9 +142,10 @@ data TypeDeclDiff = TypeDeclDiff
     , tdInfoDiff :: Change TypeDeclInfo
     } deriving (Show, Eq, Ord)
 
+
+instance ToChange TypeDecl TypeDeclDiff where
+    toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
+
 instance Diff TypeDecl TypeDeclDiff where
     diff (TypeDecl ka ia) (TypeDecl kb ib) =
         TypeDeclDiff (diff ka kb) (diff ia ib)
-
-    toChange (TypeDeclDiff t i) = TypeDecl <$> toChange t <*> toChange i
-

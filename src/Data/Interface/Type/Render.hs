@@ -1,224 +1,200 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Interface.Type.Render
 (
-    renderTypeUnqual
-  -- , renderTypeQual
-
-  , TypeSig(..)
-  , typeSig
-  , renderTypeSig
-  , renderTypeSigA
+    TypeRender(..)
+  , renderType
+  , renderTypeDiff'
+  , stringTypeRender
+  , renderTypeString
 ) where
 
 import Data.Monoid
 import Data.List ( intersperse )
 import Data.Functor.Foldable ( cata, embed )
-import Data.Bifunctor
 
 import Data.Interface.Change
+import Data.Interface.Change.View
+
 import Data.Interface.Name ( rawName )
-import Data.Interface.Type ( Type, TypeF(..),
-                             TypeConLink, TypeVar(..), Pred(..) )
+import Data.Interface.Type ( Type, TypeF(..), TypeConLink, TypeVar(..),
+                             Pred(..), TypeApply(..), varName, stripForall )
 import Data.Interface.Type.Diff
 
 
-data TypeSig con a
-    = Con con
-    | Var TypeVar
-    | Annotate a (TypeSig con a)
-    | Parens (TypeSig con a)
-    | Tupled [TypeSig con a]
-    | Apply [TypeSig con a]
-    | Fun (Maybe a) (TypeSig con a) (TypeSig con a)
-    | Forall [TypeVar] (TypeSig con a)
-    | Context (Maybe a)
-              [(Pred (TypeSig con a), Maybe a)]
-              (TypeSig con a)
-    deriving (Functor)
+-- | A @TypeRender m@ for a `Monoid` @m@ provides a means of rendering a type
+-- signature. @m@ will typically represent a display format such as text or
+-- HTML.
+data TypeRender m = TypeRender
+    { renderCon    :: TypeConLink -> m
+    , renderVar    :: TypeVar -> m
+    , renderString :: String -> m
+    } deriving (Functor)
+
+-- | A simple `TypeRender String` that does not qualify type constructors
+stringTypeRender :: TypeRender String
+stringTypeRender = TypeRender
+    { renderCon = rawName
+    , renderVar = varName
+    , renderString = id
+    }
+
+typeRenderShowS :: (TypeConLink -> String) -> TypeRender (Endo String)
+typeRenderShowS showCon =
+    Endo . showString <$> stringTypeRender {renderCon = showCon}
+
+-- | Render a type signature as a `String`.
+--
+-- @renderTypeString `rawName`@ produces an unqualified signature.
+--
+-- @renderTypeString `qualName`@ produces a fully-qualified signature.
+renderTypeString :: (TypeConLink -> String) -> Type -> String
+renderTypeString showCon t =
+    renderType (typeRenderShowS showCon) t `appEndo` ""
 
 
---data PredSig =
-
-
-mapCon :: (con -> con') -> TypeSig con a -> TypeSig con' a
-mapCon f sig0 = case sig0 of
-    Con con -> Con (f con)
-    Var v -> Var v
-    Annotate a sigs -> Annotate a (mapCon f sigs)
-    Parens sig -> Parens (mapCon f sig)
-    Tupled sigs -> Tupled (map (mapCon f) sigs)
-    Apply sigs -> Apply (map (mapCon f) sigs)
-    Fun ma arg res -> Fun ma (mapCon f arg) (mapCon f res)
-    Forall vs sig -> Forall vs (mapCon f sig)
-    Context ma ps sig ->
-        Context ma ((map.first.fmap.mapCon) f ps) (mapCon f sig)
-
-
-renderTypeSig ::
-    (Monoid m) =>
-    (String -> m) ->
-    (con -> m) ->
-    TypeSig con a -> m
-renderTypeSig = renderTypeSigA (const id)
-
-
--- | Render a type signature that contains annotations
-renderTypeSigA ::
-    (Monoid m) =>
-    (a -> m -> m) ->    -- ^ apply annotation to underlying rendered term
-    (String -> m) ->    -- ^ render string literal
-    (con -> m) ->       -- ^ render a type constructor
-    TypeSig con a -> m
-renderTypeSigA annot showString showCon = toplevel
-  where
-    toplevel sig0 = case sig0 of
-        Forall vs sig -> go sig     -- hide toplevel forall
-        _ -> go sig0
-
-    go sig0 = case sig0 of
-        Con a -> showCon a
-        Var v -> showVar v
-        Annotate a m -> annot a (go m)
-        Parens sig -> paren (go sig)
-        Tupled sigs -> tupled (map go sigs)
-        Apply sigs -> joinWith " " (map go sigs)
-        Fun ma arg res ->
-            maybeAnnot ma (go arg <> showString " -> ")
-                <> go res
-        Forall vs sig ->
-            showString "forall " <>
-            joinWith " " (map showVar vs) <>
-            showString ". " <>
-            go sig
-        Context ma sigs sig ->
-            maybeAnnot ma (tupled (map pred sigs) <> showString " => ")
-                <> go sig
-
-    maybeAnnot = maybe id annot
-
-    --joinWith :: String -> [m] -> m
-    joinWith s = mconcat . intersperse (showString s)
-
-    --paren :: m -> m
-    paren m = showString "(" <> m <> showString ")"
-
-    --tupled :: [m] -> m
-    tupled = paren . joinWith ", "
-
-    --pred :: Pred (TypeSig String) -> m
-    pred (p, ma) = maybeAnnot ma $ case p of
-        ClassPred sigs -> joinWith " " $ map go sigs
-        EqPred _ a b -> go a <> showString " ~ " <> go b
-
-    --showVar :: TypeVar -> m
-    showVar (TypeVar s _k) = showString s
-
-
-typeSigShowS :: TypeSig String a -> ShowS
-typeSigShowS = appEndo . renderTypeSig endoShowS endoShowS
-  where
-    endoShowS :: String -> Endo String
-    endoShowS = Endo . showString
-
-
-typeSigString :: (con -> String) -> TypeSig con a -> String
-typeSigString f sig = typeSigShowS (mapCon f sig) ""
-
-
-renderTypeUnqual :: Type -> String
-renderTypeUnqual = typeSigString rawName . typeSig
-
-typeSig :: Type -> TypeSig TypeConLink a
-typeSig = snd . typeSigPrec
-
+renderType :: (Monoid m) => TypeRender m -> Type -> m
+renderType tr = snd . cata (renderTypeAlg tr) . stripForall
 
 data Prec = TopPrec | FunPrec | AppPrec | ConPrec
     deriving (Show, Eq, Ord)
 
-typeSigPrec :: Type -> (Prec, TypeSig TypeConLink a)
-typeSigPrec = cata typeSigAlg
+instance Monoid Prec where
+    mempty = TopPrec
+    mappend = min
 
-typeSigAlg
-    :: TypeF (Prec, TypeSig TypeConLink a) -> (Prec, TypeSig TypeConLink a)
-typeSigAlg t0 = case t0 of
-    VarF v -> (ConPrec, Var v)
-    ConF a -> (ConPrec, Con a)
-    ApplyF c a ->
-        (,) AppPrec $ Apply [prec TopPrec c, prec AppPrec a]
-    FunF a b ->
-        (,) FunPrec $ Fun Nothing (prec FunPrec a) (prec TopPrec b)
-    ForallF vs (_, sig) ->
-        (,) TopPrec $ Forall vs sig
-    ContextF ps (_, sig) ->
-        (,) TopPrec $ Context Nothing
-                              (map (\p -> (fmap typeSig p, Nothing)) ps)
-                              sig
-  where
-    prec :: Prec -> (Prec, TypeSig TypeConLink a) -> TypeSig TypeConLink a
-    prec prec0 (prec, sig)
-         | prec <= prec0 = Parens sig
-         | otherwise = sig
 
-{-
-data TypeDiffSig con
-    = ChangeTypeSig (Change (TypeSig con ()))
-    | TypeDiffSig (TypeSig con DiffAnnot)
-    deriving (Show, Eq, Ord)
--}
+typeTermPrec :: TypeF a -> Prec
+typeTermPrec t = case t of
+    VarF{}     -> ConPrec
+    ConF{}     -> ConPrec
+    ApplyF a   -> case a of
+        ConList{}  -> ConPrec
+        ConTuple{} -> ConPrec
+        _          -> AppPrec
+    FunF{}     -> FunPrec
+    ForallF{}  -> TopPrec
+    ContextF{} -> TopPrec
 
-type TypeDiffSig = TypeSig TypeConLink DiffAnnot
 
-data DiffAnnot = AnnotRemoved | AnnotAdd | AnnotChanged
-    deriving (Show, Eq, Ord)
+renderTypeApply :: (Monoid m) => TypeRender m -> TypeApply (Prec, m) -> m
+renderTypeApply tr a = case a of
+    ConApply t ts ->
+        joinWith tr " " $ prec tr TopPrec t : map (prec tr AppPrec) ts
+    ConList t ->
+        renderString tr "[" <> prec tr TopPrec t <> renderString tr "]"
+    ConTuple _arity ts -> tupled tr $ map (prec tr TopPrec) ts
 
-typeDiffSig :: TypeDiff -> Change TypeDiffSig
-typeDiffSig = fmap snd . cata typeDiffSigAlg
+renderTypeAlg ::
+    forall m. (Monoid m) =>
+    TypeRender m -> TypeF (Prec, m) -> (Prec, m)
+renderTypeAlg tr@TypeRender{..} term =
+    (,) (typeTermPrec term) $ case term of
+        VarF v -> renderVar v
+        ConF c -> renderCon c
+        ApplyF a -> renderTypeApply tr a
+            --prec TopPrec c <> renderString " " <> prec AppPrec a
+        FunF a b ->
+            prec tr FunPrec a <> renderString " -> " <> prec tr TopPrec b
+        ForallF vs (_, m) ->
+            renderString "forall " <> joinWith tr " " (map renderVar vs) <>
+            renderString ". " <> m
+        ContextF ps (_, m) ->
+            tupled tr (map (renderPred tr) ps) <> renderString " => " <> m
 
-typeDiffSigAlg
-    :: DiffTypeF Type (Change (Prec, TypeDiffSig))
-    -> Change (Prec, TypeDiffSig)
-typeDiffSigAlg dt0 = case dt0 of
-    NoDiffTypeF t ->
-        NoChange $ typeSigPrec (embed t)
+
+prec :: (Monoid m) => TypeRender m -> Prec -> (Prec, m) -> m
+prec tr prec0 (prec, sig)
+     | prec <= prec0 = paren tr sig
+     | otherwise = sig
+
+paren :: (Monoid m) => TypeRender m -> m -> m
+paren tr m = renderString tr "(" <> m <> renderString tr ")"
+
+tupled :: (Monoid m) => TypeRender m -> [m] -> m
+tupled tr = paren tr . joinWith tr ", "
+
+
+joinWith :: (Monoid m) => TypeRender m -> String -> [m] -> m
+joinWith rt s = mconcat . intersperse (renderString rt s)
+
+
+renderPred :: (Monoid m) => TypeRender m -> Pred Type -> m
+renderPred tr p = case p of
+    ClassPred ts -> joinWith tr " " $ map (renderType tr) ts
+    EqPred _ a b ->
+        renderType tr a <> renderString tr " ~ " <> renderType tr b
+
+
+renderTypeDiff' ::
+    (Monoid m) =>
+    RenderCombined m ->             -- ^ how to display differences
+    TypeRender m ->                 -- ^ how to render type information
+    TypeDiff' -> DiffView m
+renderTypeDiff' dr tr =
+    fmap snd . cata (renderTypeDiff'Alg dr tr) . stripForallDiff'
+
+
+renderTypeDiffAlg ::
+    forall m. (Monoid m) =>
+    RenderCombined m ->
+    TypeRender m ->
+    DiffTypeF Type (DiffView (Prec, m)) -> DiffView (Prec, m)
+renderTypeDiffAlg rc tr td0 = case td0 of
+    NoDiffTypeF t -> pure $ renderTerm t
     ReplaceTypeF t0 t1 ->
-        fmap (second (Annotate AnnotChanged) . typeSigPrec . embed) $
-            Change t0 t1
-    SameTypeF t -> typeSigAlg <$> sequence t
-
-
-
-typeDiff'Sig :: TypeDiff' -> Change TypeDiffSig
-typeDiff'Sig = fmap snd . cata typeDiff'SigAlg
-
-typeDiff'SigAlg
-    :: DiffTypeF' Type (Change (Prec, TypeDiffSig))
-    -> Change (Prec, TypeDiffSig)
-typeDiff'SigAlg dt' = case dt' of
-    BasicDiffTypeF dt -> typeDiffSigAlg dt
-    ChangeContext ps0 ps1 c -> _ <$> Change ps0 ps1 <*> c 
-
--- | Given two versions of a Context
-contextDiff
-    :: [Pred Type] -> [Pred Type] -> Change (TypeDiffSig -> TypeDiffSig)
-contextDiff ps0 ps1
-    | ps0 == ps1 = Same (Context ps1)
-    | otherwise = error "undefined: contextDiff"
-
-
-{-
-renderTypeDiffAlg :: (Render a) => DiffTypeF Type (Prec, a) -> (Prec, RDoc)
-renderTypeDiffAlg td0 = case td0 of
-    NoDiffTypeF t -> (ConPrec, doc $ embed t)
-    ReplaceTypeF t0 t1 ->
-        (,) ConPrec $ style braces $
-            style red (doc $ embed t0) <+>
-            text' "/" <+>
-            style green (doc $ embed t1)
-    SameTypeF fc -> renderTypeAlg $ fmap (second doc) fc
+        elemViewPrec rc $ Elem $ Change (renderTerm t0) (renderTerm t1)
+    SameTypeF c -> fmap (renderTypeAlg tr) $ sequence c
   where
-    replaceDoc :: Replace Type -> RDoc
-    replaceDoc (Replace t0 t1) =
-        style braces $
-            style red (doc t0) <+> text' "/" <+> style green (doc t1)
--}
+    renderTerm :: TypeF Type -> (Prec, m)
+    renderTerm = cata (renderTypeAlg tr) . embed
+
+elemViewPrec ::
+    (Monoid m) =>
+    RenderCombined m ->
+    Elem (Change (Prec, m)) (Prec, m) ->
+    DiffView (Prec, m)
+elemViewPrec rc = elemView' (combineRC renderCombinedPrec rc)
+  where
+    renderCombinedPrec e = Just $ case e of
+        Removed p -> p
+        Added p -> p
+        Elem (Replace a b) -> min a b
+
+
+renderTypeDiff'Alg ::
+    forall m. (Monoid m) =>
+    RenderCombined m ->
+    TypeRender m ->
+    TypeDiff'F (DiffView (Prec, m)) -> DiffView (Prec, m)
+renderTypeDiff'Alg rc tr td0 = case td0 of
+    ChangeContext cc c ->
+        (,) TopPrec <$> (mappend <$> context <*> fmap snd c)
+          where
+            cxt = renderContext . map (pure . renderPred tr)
+            context = case cc of
+                RemovedContext ps -> elemView' rc . Removed =<< cxt ps
+                AddedContext ps   -> elemView' rc . Added =<< cxt ps
+                ContextElems p ->
+                    renderContext $ map renderElemPred (patienceElems p)
+    {-
+    NoDiffApply t0 ts -> case (t0, ts) of
+        (Type.Con (Qual _ "[]"), [a]) ->
+            renderString tr "[" ++ renderType tr a ++ renderString tr "]"
+        _ -> pure (AppPrec, renderType tr $ apply t0 ts)
+    -}
+    TypeDiff'F dtf -> renderTypeDiffAlg rc tr dtf
+  where
+    renderElemPred :: Elem (Pred Type) (Pred Type) -> DiffView m
+    renderElemPred e = case e of
+        Removed p -> elemView' rc $ Removed $ renderPred tr p
+        Added p -> elemView' rc $ Added $ renderPred tr p
+        Elem p -> pure $ renderPred tr p
+
+    renderContext :: [DiffView m] -> DiffView m
+    renderContext ps =
+        pure (renderString tr "(") <>
+        (joinWith tr ", " <$> sequence ps) <>
+        pure (renderString tr ") => ")

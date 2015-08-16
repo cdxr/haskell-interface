@@ -16,28 +16,35 @@ mainStyleText :: Text
 mainStyleText = render mainStyle
 
 
+highlightChange :: Css
+highlightChange = fontWeight bold
+
 mainStyle :: Css
 mainStyle = do
     body ? do
         backgroundColor "#f0f0f0"
         fontFamily [] [monospace]
 
-    byClass "removed" & color removalColor
-    byClass "added" & color additionColor
-    --byClass "no-change" & color noChangeColor
+    ".removed" & do
+        highlightChange
+        color removalColor
 
-    byClass "export-id" & fontWeight bold
+    ".added" & do
+        highlightChange
+        color additionColor
 
-    byClass "export-list" & do
+    ".export-list" & do
         listStyleType none
         padding nil (em 1) nil (em 1)
 
         li <? do
             marginLeft nil
             lineHeight (pct 200)
-            borderBottom solid 2 "#eee"
+            borderBottom solid 2 "#ddd"
 
-    byClass "change" & do
+    ".change" & highlightChange
+
+    ".change" & do
         listStyleType none
         paddingLeft nil
 
@@ -51,7 +58,7 @@ mainStyle = do
             color additionColor
 
     -- TODO: all "decl" properties should be indented
-    byClass "signature" & marginLeft (em 2)
+    ".signature" & marginLeft (em 2)
         
 
 additionColor :: Color

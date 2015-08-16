@@ -34,6 +34,18 @@ data ModuleDiff = ModuleDiff
     , diffModuleOrigins    :: NameMapDiff' SomeName (Change Origin) Origin
     }
 
+
+instance ToChange ModuleInterface ModuleDiff where
+    toChange mdiff =
+        ModuleInterface
+            <$> diffModuleName mdiff
+            <*> toChange (diffModuleTypeCons mdiff)
+            <*> toChange (diffModuleValueDecls mdiff)
+            <*> toChange (diffModuleTypeDecls mdiff)
+            <*> toChange (diffModuleExportList mdiff)
+            <*> toChange (diffModuleInstances mdiff)
+            <*> toChange (diffModuleOrigins mdiff)
+
 instance Diff ModuleInterface ModuleDiff where
     noDiff iface = ModuleDiff
         { diffModuleName       = noDiff $ moduleName iface
@@ -55,24 +67,15 @@ instance Diff ModuleInterface ModuleDiff where
         , diffModuleOrigins    = on diff moduleOrigins a b
         }
 
-    toChange mdiff =
-        ModuleInterface
-            <$> diffModuleName mdiff
-            <*> toChange (diffModuleTypeCons mdiff)
-            <*> toChange (diffModuleValueDecls mdiff)
-            <*> toChange (diffModuleTypeDecls mdiff)
-            <*> toChange (diffModuleExportList mdiff)
-            <*> toChange (diffModuleInstances mdiff)
-            <*> toChange (diffModuleOrigins mdiff)
-
 
 lookupExportElem :: SetElem ExportName -> ModuleDiff -> ExportElem
---    SetElem ExportName -> ModuleDiff -> Elem (Change Export) Export
 lookupExportElem e mdiff =
-    Named (rawName n) $ fromElemChange $ mapElem unName x
+    Named n $ mapElem (fromChange . fmap unName) $ fmap unName elem
   where
-    x = (unsafeFindExport <$> toChange mdiff) `applyChange` setElemChange e
-    n = extractSetElem e
+    n = rawName $ extractSetElem e
+
+    elem :: Elem (Change (Named Entity)) (Named Entity)
+    elem = (unsafeFindExport <$> toChange mdiff) `applyChange` setElemChange e
 
 
 isLocalElemChange ::

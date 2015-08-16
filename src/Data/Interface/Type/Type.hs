@@ -8,6 +8,7 @@
 module Data.Interface.Type.Type where
 
 import qualified Data.Functor.Foldable as FF
+import Control.Monad
 
 import Data.Interface.Name
 import Data.Interface.Source ( Origin )
@@ -15,7 +16,8 @@ import Data.Interface.Source ( Origin )
 
 data Type
     = Con TypeConLink             -- ^ type constructors
-    | Apply Type Type             -- ^ type constructor application
+--    | Apply Type Type             -- ^ type constructor application
+    | Apply (TypeApply Type)      -- ^ type constructor application
     | Fun Type Type               -- ^ (->) type constructor
     | Var TypeVar                 -- ^ type variables ("a")
     | Forall [TypeVar] Type       -- ^ forall qualifiers / constraints
@@ -28,7 +30,8 @@ data Type
 -- a tree of type differences.
 data TypeF a
     = ConF TypeConLink             -- ^ type constructors
-    | ApplyF a a                   -- ^ type constructor application
+--    | ApplyF a a                   -- ^ type constructor application
+    | ApplyF (TypeApply a)         -- ^ type constructor application
     | FunF a a                     -- ^ (->) type constructor
     | VarF TypeVar                 -- ^ type variables ("a")
     | ForallF [TypeVar] a          -- ^ forall qualifiers / constraints
@@ -40,7 +43,7 @@ type instance FF.Base Type = TypeF
 instance FF.Foldable Type where
     project t0 = case t0 of
         Con l -> ConF l
-        Apply c t -> ApplyF c t
+        Apply a -> ApplyF a
         Fun a b -> FunF a b
         Var v -> VarF v
         Forall vs t -> ForallF vs t
@@ -49,7 +52,7 @@ instance FF.Foldable Type where
 instance FF.Unfoldable Type where
     embed f = case f of
         ConF l -> Con l
-        ApplyF c t -> Apply c t
+        ApplyF a -> Apply a
         FunF a b -> Fun a b
         VarF v -> Var v
         ForallF vs t -> Forall vs t
@@ -133,6 +136,30 @@ instance TraverseNames TypeCon where
                 <*> pure o
                 <*> traverseNames f k
                 <*> pure i
+
+
+typeName :: Type -> Maybe RawName
+typeName t0 = case t0 of
+    Con l -> Just $ rawName l
+    _     -> Nothing
+
+
+stripForall :: Type -> Type
+stripForall t0 = case FF.project t0 of
+    ForallF _ t -> t
+    _           -> t0
+
+
+data TypeApply t
+    = ConApply t [t]
+    | ConList t
+    | ConTuple Int [t]
+    deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+takeApply :: Type -> Maybe (TypeApply Type)
+takeApply t0 = case t0 of
+    Apply a -> Just a
+    _       -> Nothing
 
 
 
