@@ -51,6 +51,7 @@ data Verbosity = Quiet | Verbose
 data ProgramArgs = ProgramArgs
     { outputClassInstances :: Bool      -- internal
     -- , dumpInterfaces :: Bool            -- internal
+    , onlyShowChanges :: Bool
     , verbosity :: Verbosity
     , outputFormat :: OutputFormat
     , outputFile :: Maybe FilePath
@@ -68,6 +69,7 @@ mainParser :: Parser ProgramArgs
 mainParser =
   ProgramArgs
     <$> switch_instances
+    <*> switch_onlyChanges
     <*> flag_verbosity
     <*> parseFormat
     <*> parseFile
@@ -117,6 +119,12 @@ switch_instances = switch $ mconcat
     [ long "instances"
     , help "Include class instances"
     , internal
+    ]
+
+switch_onlyChanges :: Parser Bool
+switch_onlyChanges = switch $ mconcat
+    [ long "only-changes"
+    , help "Only output interface changes"
     ]
 
 flag_verbosity :: Parser Verbosity

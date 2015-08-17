@@ -3,6 +3,7 @@
 module Html where
 
 import Control.Monad
+import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
 import Data.Monoid
@@ -180,8 +181,13 @@ renderModuleInterface = renderModuleDiff . noDiff
 
 renderModuleDiff :: ModuleDiff -> HtmlT Program ()
 renderModuleDiff mdiff = do
+    onlyChanges <- lift $ getArg onlyShowChanges
+
     let mc = diffModuleName mdiff
         exports = diffModuleExports mdiff
+        visibleExports
+            | onlyChanges = filter (isElemChanged . unName) exports
+            | otherwise = exports
 
     div_ [ class_ "module" ] $ do
         h2_ $ toHtml $ showChange " => " id mc
@@ -189,7 +195,7 @@ renderModuleDiff mdiff = do
         renderElemSummary $ summarize (map unName exports)
 
         ol_ [ class_ "export-list" ] $
-            mapM_ (li_ . renderExportElem mc) $ reverse exports
+            mapM_ (li_ . renderExportElem mc) $ reverse visibleExports
 
 
 renderElemSummary :: ElemSummary -> HtmlT Program ()
