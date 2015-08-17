@@ -400,3 +400,28 @@ instance (Ord a) => Diff [a] (Patience a) where
             Patience.Old a -> Removed a
             Patience.New b -> Added b
             Patience.Both a b -> Elem (Replace a b)
+
+
+-- * ElemSummary
+
+data ElemSummary = ElemSummary
+    { removedCount   :: !Int
+    , addedCount     :: !Int
+    , changedCount   :: !Int
+    , unchangedCount :: !Int
+    } deriving (Show, Eq, Ord)
+
+instance Monoid ElemSummary where
+    mempty = ElemSummary 0 0 0 0
+    ElemSummary r0 a0 c0 u0 `mappend` ElemSummary r1 a1 c1 u1 =
+        ElemSummary (r0 + r1) (a0 + a1) (c0 + c1) (u0 + u1)
+
+summarize :: (Foldable f, ToChange a c) => f (Elem c a) -> ElemSummary
+summarize = foldMap summarizeElem
+
+summarizeElem :: (ToChange a c) => Elem c a -> ElemSummary
+summarizeElem e = case e of
+    Removed{} -> mempty { removedCount = 1 }
+    Added{}   -> mempty { addedCount = 1 }
+    Elem c | isChanged c -> mempty { changedCount = 1 }
+           | otherwise   -> mempty { unchangedCount = 1 }

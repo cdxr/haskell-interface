@@ -25,6 +25,10 @@ mainStyle = do
         backgroundColor "#f0f0f0"
         fontFamily [] [monospace]
 
+    ".elem-summary" & do
+        padding nil (em 2) nil (em 2)
+        star # ".changed" <? highlightChange
+
     ".removed" & do
         highlightChange
         color removalColor

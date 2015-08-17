@@ -7,6 +7,7 @@ import Control.Monad.IO.Class
 
 import Data.Monoid
 import Data.Foldable
+import Data.List ( intersperse )
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Blaze.ByteString.Builder as Blaze
@@ -180,11 +181,33 @@ renderModuleInterface = renderModuleDiff . noDiff
 renderModuleDiff :: ModuleDiff -> HtmlT Program ()
 renderModuleDiff mdiff = do
     let mc = diffModuleName mdiff
-    h2_ $ toHtml $ showChange " => " id mc
+        exports = diffModuleExports mdiff
 
-    ol_ [ class_ "export-list" ] $
-        mapM_ (li_ . renderExportElem mc) $
-            reverse $ diffModuleExports mdiff
+    div_ [ class_ "module" ] $ do
+        h2_ $ toHtml $ showChange " => " id mc
+
+        renderElemSummary $ summarize (map unName exports)
+
+        ol_ [ class_ "export-list" ] $
+            mapM_ (li_ . renderExportElem mc) $ reverse exports
+
+
+renderElemSummary :: ElemSummary -> HtmlT Program ()
+renderElemSummary es =
+    div_ [ class_ "elem-summary" ] $
+        mconcat $ intersperse ", " $ visibleStats
+  where
+    visibleStats = [ go s n | (s,n) <- stats, n > 0 ]
+    stats =
+        [ ("removed",   removedCount es)
+        , ("added",     addedCount es)
+        , ("changed",   changedCount es)
+        , ("unchanged", unchangedCount es)
+        ]
+
+    go :: (Monad m) => String -> Int -> HtmlT m ()
+    go s n = span_ [ class_ (Text.pack s) ] $
+                toHtml $ show n ++ " " ++ s
 
 
 renderPackageDiff :: PackageDiff -> HtmlT Program ()
