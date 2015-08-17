@@ -53,20 +53,30 @@ import Data.Interface.GHC.Package
 makeModuleName :: Cabal.ModuleName -> Interface.ModuleName
 makeModuleName = intercalate "." . components
 
-makePackageInterface :: LocPackage -> IO PackageInterface
-makePackageInterface lp@(LocPackage _ ipi) = do
+makePackageInterface
+    :: (String -> IO ())        -- ^ error printer
+    -> LocPackage               -- ^ package location
+    -> IO PackageInterface      -- ^ package interface
+makePackageInterface debugInfo lp@(LocPackage _ ipi) = do
+    liftIO . debugInfo $
+        "starting fresh GHC session to load " ++ showLocPackage lp
+
     withGhc $ do
         ghcLocPackage lp
 
+        liftIO $ debugInfo "package loaded"
+
         let pkgKey = packageKey ipi
         exposed <- makeModuleEnv pkgKey $ map exposedName (exposedModules ipi)
-        hidden  <- makeModuleEnv pkgKey $ hiddenModules ipi
+        --hidden  <- makeModuleEnv pkgKey $ hiddenModules ipi
+        let hidden = mempty
         pure $ PackageInterface
             { pkgId             = sourcePackageId ipi
             , pkgExposedModules = exposed
             , pkgHiddenModules  = hidden
             }
 
+-- | Expose a package to GHC
 ghcLocPackage :: LocPackage -> Ghc ()
 ghcLocPackage (LocPackage db ipi) = do
     dflags0 <- getSessionDynFlags
@@ -74,7 +84,7 @@ ghcLocPackage (LocPackage db ipi) = do
             { extraPkgConfs = (toPkgConfRef db :)
             , packageFlags = [ ExposePackage (pkgArg ipi) modRenaming ]
             }
-    liftIO $ GHC.linkPackages dflags0 pkgKeys
+    --liftIO $ GHC.linkPackages dflags0 pkgKeys
 
     return ()
   where
@@ -87,7 +97,7 @@ ghcLocPackage (LocPackage db ipi) = do
     pkgArg :: InstalledPackageInfo -> PackageArg
     pkgArg = PackageIdArg . Cabal.display . Cabal.installedPackageId
 
-    modRenaming = ModRenaming True []  -- TODO
+    modRenaming = ModRenaming True []
 
 
 debugPackageFlags :: Ghc ()

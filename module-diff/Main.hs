@@ -57,8 +57,8 @@ loadPackage (Target mdb sel) = do
     case lps of
         [] -> error $ "could not find package: " ++ showPackageSelector sel
         lp:_ -> do
-            verbose $ "using package location: " ++ showLocPackage lp
-            liftIO $ makePackageInterface lp
+            f <- getVerbosePrinter 
+            liftIO $ makePackageInterface f lp
   where
     dbStack = case mdb of
         Nothing -> [GlobalPackageDB, UserPackageDB]

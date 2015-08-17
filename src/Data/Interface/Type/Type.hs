@@ -8,7 +8,6 @@
 module Data.Interface.Type.Type where
 
 import qualified Data.Functor.Foldable as FF
-import Control.Monad
 
 import Data.Interface.Name
 import Data.Interface.Source ( Origin )
@@ -16,7 +15,6 @@ import Data.Interface.Source ( Origin )
 
 data Type
     = Con TypeConLink             -- ^ type constructors
---    | Apply Type Type             -- ^ type constructor application
     | Apply (TypeApply Type)      -- ^ type constructor application
     | Fun Type Type               -- ^ (->) type constructor
     | Var TypeVar                 -- ^ type variables ("a")
@@ -30,7 +28,6 @@ data Type
 -- a tree of type differences.
 data TypeF a
     = ConF TypeConLink             -- ^ type constructors
---    | ApplyF a a                   -- ^ type constructor application
     | ApplyF (TypeApply a)         -- ^ type constructor application
     | FunF a a                     -- ^ (->) type constructor
     | VarF TypeVar                 -- ^ type variables ("a")

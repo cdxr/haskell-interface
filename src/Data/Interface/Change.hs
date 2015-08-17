@@ -18,6 +18,9 @@ import Data.Functor.Classes
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
+import Data.Set ( Set )
+import qualified Data.Set as Set
+
 import qualified Data.Algorithm.Patience as Patience
 
 
@@ -217,6 +220,12 @@ getElem e = case e of
     Elem c -> Just c
     _      -> Nothing
 
+elemMaybe :: (ToChange a c) => Elem c a -> Change (Maybe a)
+elemMaybe e = case e of
+    Removed a -> Change (Just a) Nothing
+    Added a   -> Change Nothing (Just a)
+    Elem c    -> Just <$> toChange c
+
 
 -- | Analagous to @fromMaybe@. @fromElem x@ is a function that converts an
 -- @Elem c a@ to a @c@ by filling in @x@ for any missing value of type @a@.
@@ -289,28 +298,28 @@ diffMaybe (Just a) (Just b) = Just $ Elem (diff a b)
 
 -- ** Set
 
-{- TODO:
-newtype SetDiff a = SetDiff { Map a (SetElem ()) }
+newtype SetDiff a = SetDiff (Map a (SetElem ()))
+    deriving (Show, Eq, Ord)
 
-instance Diff (Set a) (SetDiff a) where
--}
+instance (Ord a) => ToChange (Set a) (SetDiff a) where
+    toChange (SetDiff m) = Map.foldMapWithKey set m
+      where
+        set :: a -> SetElem () -> Change (Set a)
+        set a se = let s = Set.singleton a in case se of
+            Removed{} -> Change s Set.empty
+            Added{}   -> Change Set.empty s
+            Elem{}    -> Change s s
 
-
-{-
-type DiffSet c a = [Elem c a]
-type DiffSetEq a = [ElemEq a]
-
--- | The differences in element inclusion between two sets
-diffSet :: (Ord a) => Set a -> Set a -> DiffSetEq a
-diffSet xs0 ys0 = go (Set.toAscList xs0) (Set.toAscList ys0)
-  where
-    go [] ys = map Added ys
-    go xs [] = map Removed xs
-    go (x:xs) (y:ys) = case compare x y of
-        EQ -> Changed (NoChange y) : go xs ys
-        LT -> Removed x : go xs (y:ys)
-        GT -> Added y : go (x:xs) ys
--}
+instance (Ord a) => Diff (Set a) (SetDiff a) where
+    diff xs0 ys0 =
+        SetDiff $ Map.fromList $ go (Set.toAscList xs0) (Set.toAscList ys0)
+      where
+        go xs [] = map (\x -> (x, Removed ())) xs
+        go [] ys = map (\y -> (y, Added ())) ys
+        go (x:xs) (y:ys) = case compare x y of
+            LT -> (x, Removed ())     : go xs (y:ys)
+            EQ -> (y, Elem $ Same ()) : go xs ys
+            GT -> (y, Added ())       : go (x:xs) ys
 
 
 -- ** Map
@@ -388,10 +397,8 @@ patienceElems = map (mapElem mostRecent) . patienceElems'
 instance ToChange [a] (Patience a) where
     toChange (Patience es) = reverse <$> foldr go (Change [] []) es
       where
-        go e (Change as bs) = case e of
-            Removed a          -> Change (a:as)  bs
-            Added b            -> Change as     (b:bs)
-            Elem (Replace a b) -> Change (a:as) (b:bs)
+        go :: Elem (Replace a) a -> Change [a] -> Change [a]
+        go e c = maybe id (:) <$> elemMaybe e <*> c
 
 instance (Ord a) => Diff [a] (Patience a) where
     diff as bs = Patience $ map toElem (Patience.diff as bs)

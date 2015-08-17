@@ -16,8 +16,11 @@ module Data.Interface.Package
 where
 
 import Data.Function ( on )
+
 import Data.Map ( Map )
 import qualified Data.Map as Map
+
+import Data.Set ( Set )
 
 import Distribution.Text
 import Distribution.Package as C
@@ -38,7 +41,7 @@ data PackageInterface = PackageInterface
     { pkgId             :: PackageId
     --, pkgInfo           :: PackageInfo
     , pkgExposedModules :: ModuleEnv
-    , pkgHiddenModules  :: ModuleEnv
+    , pkgHiddenModules  :: Set ModuleName
     } deriving (Show)
 
 {- PackageInterface notes:
@@ -56,7 +59,7 @@ data PackageDiff = PackageDiff
     { diffPkgId             :: Change C.PackageId
     --, diffPkgInfo           :: Change PackageInfo
     , diffPkgExposedModules :: MapDiff ModuleName ModuleDiff ModuleInterface
-    , diffPkgHiddenModules  :: MapDiff ModuleName ModuleDiff ModuleInterface
+    , diffPkgHiddenModules  :: SetDiff ModuleName
     }
 
 instance ToChange PackageInterface PackageDiff where

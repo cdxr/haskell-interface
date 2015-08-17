@@ -17,6 +17,7 @@ import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
+import Data.Maybe
 import qualified Data.Map as Map
 
 import GHC
@@ -279,7 +280,7 @@ makeModuleInfoInterface ghcModule modInfo = do
     -- that is both defined in and exposed by the current module. Then, return
     -- the `TypeMap` for the current module so the it can be included in
     -- the `ModuleInterface`.
-    typeCons <- mapM makeTypeCon =<< seenLocalTyCons
+    typeCons <- fmap catMaybes . mapM makeTypeCon =<< seenLocalTyCons
     typeMap <- withTypeEnv $ do
         modify $ \env -> foldr insertType env typeCons
         gets $ Interface.lookupModule modName
@@ -393,57 +394,59 @@ makePreds pt = case Type.classifyPredType pt of
 makeClassType :: GHC.Class -> Interface.Type
 makeClassType = Con . makeQualName . GHC.getName
 
+
 -- | Construct a `TypeCon` to be included in a `ModuleInterface`, and add it
 -- to the `TypeEnv` when it originates in the current module.
-makeTypeCon :: GHC.TyCon -> LoadModule (Qual Interface.TypeCon)
-makeTypeCon ghcTyCon = do
-    let ghcName = GHC.getName ghcTyCon
-    typeCon <-
-        TypeCon (makeRawName ghcName) (makeOrigin ghcName) kind <$> info
+makeTypeCon :: GHC.TyCon -> LoadModule (Maybe (Qual Interface.TypeCon))
+makeTypeCon ghcTyCon = case makeTypeConInfo ghcTyCon of
+    Nothing -> pure Nothing
+    Just info -> Just <$> do
+        let ghcName = GHC.getName ghcTyCon
+            typeCon =
+                TypeCon (makeRawName ghcName) (makeOrigin ghcName) kind info
+            namedCon = makeQual ghcName typeCon
 
-    -- traceM $ "TRACE makeTypeCon: " ++ show typeCon
+        withTypeEnv $ namedCon <$ do
+            let name = Interface.getQualName namedCon
+            mStoredCon <- gets $ lookupType name
+            case mStoredCon of
+                Left _ ->  -- the type constructor is not stored yet: add it
+                    modify $ insertType namedCon
+                Right storedCon
+                    | storedCon /= typeCon ->
+                        fail $ "makeTypeCon: type constructor does not match the"
+                            ++ " one in TypeEnv: " ++ showQualName name
+                    {- TODO: ^ This asserts that the now-created type constructor is
+                       the same as the one stored in the TypeEnv.
+                       They should _always_ be the same, and this will later be
+                       removed.
+                    -}
+                    | otherwise -> pure ()
+      where
+        kind = makeKind $ TyCon.tyConKind ghcTyCon
 
-    let namedCon = makeQual ghcName typeCon
 
-    withTypeEnv $ namedCon <$ do
-        let name = Interface.getQualName namedCon
-        mStoredCon <- gets $ lookupType name
-        case mStoredCon of
-            Left _ ->  -- the type constructor is not stored yet: add it
-                modify $ insertType namedCon
-            Right storedCon
-                | storedCon /= typeCon ->
-                    fail $ "makeTypeCon: type constructor does not match the"
-                        ++ " one in TypeEnv: " ++ showQualName name
-                {- TODO: ^ This asserts that the now-created type constructor is
-                   the same as the one stored in the TypeEnv.
-                   They should _always_ be the same, and this will later be
-                   removed.
-                -}
-                | otherwise -> pure ()
-  where
-    kind = makeKind $ TyCon.tyConKind ghcTyCon
+makeTypeConInfo :: (Monad m) => GHC.TyCon -> m Interface.TypeConInfo
+makeTypeConInfo ghcTyCon
+    | Just _cls <- TyCon.tyConClass_maybe ghcTyCon =
+        pure ConClass
+    | TyCon.isAlgTyCon ghcTyCon =
+        pure ConAlgebraic
+    | TyCon.isTypeSynonymTyCon ghcTyCon =
+        pure ConSynonym
+    -- TODO: type family instances
+    | TyCon.isFamInstTyCon ghcTyCon =
+        fail "makeTypeCon: family instances not implemented"
+    | otherwise = do
+        let s = unsafeOutput ghcTyCon
+        fail $ "makeTypeCon: unrecognized: " ++ s
 
-    info
-        | Just _cls <- TyCon.tyConClass_maybe ghcTyCon =
-            pure ConClass
-        | TyCon.isAlgTyCon ghcTyCon =
-            pure ConAlgebraic
-        | TyCon.isTypeSynonymTyCon ghcTyCon =
-            pure ConSynonym
-        -- TODO: type family instances
-        | TyCon.isFamInstTyCon ghcTyCon =
-            fail "makeTypeCon: family instances not implemented"
-        | otherwise = do
-            s <- pprGHC ghcTyCon
-            fail $ "makeTypeCon: unrecognized: " ++ s
-
-    --  | isFunTyCon tc = 
-    --  | isPrimTyCon tc = 
-    --  | isTupleTyCon tc = 
-    --  | isUnboxedTupleTyCon tc = 
-    --  | isBoxedTupleTyCon tc = 
-    --  | isPromotedDataCon tc = 
+--  | isFunTyCon tc = 
+--  | isPrimTyCon tc = 
+--  | isTupleTyCon tc = 
+--  | isUnboxedTupleTyCon tc = 
+--  | isBoxedTupleTyCon tc = 
+--  | isPromotedDataCon tc = 
 
 
 makeDataConList :: GHC.TyCon -> DataConList

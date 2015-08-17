@@ -49,5 +49,12 @@ whenArgs_ f m = do
 
 verbose :: String -> Program ()
 verbose msg = do
-    whenArgs_ ((>= Verbose) . verbosity) $
-        liftIO $ putStrLn msg
+    f <- getVerbosePrinter
+    liftIO $ f msg
+
+getVerbosePrinter :: Program (String -> IO ())
+getVerbosePrinter = getFun <$> getArg verbosity
+  where
+    getFun :: Verbosity -> String -> IO ()
+    getFun Verbose = liftIO . putStrLn
+    getFun Quiet = const $ return ()
