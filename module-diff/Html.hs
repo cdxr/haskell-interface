@@ -127,14 +127,14 @@ renderModuleDiffGroup = simpleLinkList makeId makeLinkText renderModuleElem
   where
     makeId :: Elem ModuleDiff ModuleInterface -> Text
     makeId e = case e of
-        Removed m -> "removed-" <> moduleNameElemId (moduleName m)
-        Added m   -> "added-" <> moduleNameElemId (moduleName m)
+        Removed m -> moduleNameElemId (moduleName m)
+        Added m   -> moduleNameElemId (moduleName m)
         Elem c    -> Text.pack $ new $ diffModuleName c
 
     makeLinkText :: (Monad m) => Elem ModuleDiff ModuleInterface -> HtmlT m ()
     makeLinkText e = case e of
         Removed m -> formatRemoved $ toHtml $ moduleName m
-        Added m   -> formatRemoved $ toHtml $ moduleName m
+        Added m   -> formatAdded $ toHtml $ moduleName m
         Elem c -> span_ [ class_ cls ] $
                     toHtml $ showChange " => " id (diffModuleName c)
           where
