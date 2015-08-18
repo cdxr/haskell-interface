@@ -178,8 +178,10 @@ renderModuleElem moduleElem = do
 
         renderElemSummary moduleElem
 
-        ol_ [ class_ "export-list" ] $
-            mapM_ (li_ . renderExportElem nameElem) $ reverse visibleExports
+        formatElemAs moduleElem $
+            ol_ [ class_ "export-list " ] $
+                mapM_ (li_ . renderExportElem nameElem) $
+                    reverse visibleExports
 
 
 renderElemSummary :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
@@ -360,6 +362,15 @@ formatAs e html = with html [class_ cls]
         Added{}   -> "added "
         Elem c | isChanged c -> "changed "
                | otherwise   -> "not-changed "
+
+-- | Same as `formatAs`, but only applies formatting for "Add" and "Remove"
+formatElemAs :: (Monad m) => Elem c a -> HtmlT m r -> HtmlT m r
+formatElemAs e html = with html [class_ cls]
+  where
+    cls = case e of
+        Removed{} -> "removed "
+        Added{}   -> "added "
+        Elem c    -> ""
 
 formatAdded :: (Monad m) => HtmlT m a -> HtmlT m a
 formatAdded = span_ [ class_ "added" ]
