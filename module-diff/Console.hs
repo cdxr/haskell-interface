@@ -10,11 +10,14 @@ import Render ( Render(..), renderStdout )
 
 
 runTask :: ProgramResult -> Program ()
-runTask r = case r of
+runTask r = error "console output currently disabled"
+{-
+case r of
     APackage p -> printPackageInterface p
     AModule _ m -> printModuleInterface m
     AModuleDiff t0 t1 mdiff -> printModuleDiff (t0, t1) mdiff
     _ -> error "Console.runTask unimplemented for this target type"
+-}
 
 
 printPackageInterface :: PackageInterface -> Program ()

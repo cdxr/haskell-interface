@@ -50,7 +50,7 @@ data Verbosity = Quiet | Verbose
 
 data ProgramArgs = ProgramArgs
     { outputClassInstances :: Bool      -- internal
-    -- , dumpInterfaces :: Bool            -- internal
+    , includeNotes :: Bool              -- internal
     , onlyShowChanges :: Bool
     , verbosity :: Verbosity
     , outputFormat :: OutputFormat
@@ -69,6 +69,7 @@ mainParser :: Parser ProgramArgs
 mainParser =
   ProgramArgs
     <$> switch_instances
+    <*> switch_notes
     <*> switch_onlyChanges
     <*> flag_verbosity
     <*> parseFormat
@@ -121,6 +122,13 @@ switch_instances = switch $ mconcat
     , internal
     ]
 
+switch_notes :: Parser Bool
+switch_notes = switch $ mconcat
+    [ long "notes"
+    , help "Include hidden notes in the HTML"
+    , internal
+    ]
+
 switch_onlyChanges :: Parser Bool
 switch_onlyChanges = switch $ mconcat
     [ long "only-changes"
@@ -133,18 +141,6 @@ flag_verbosity = flag Quiet Verbose $ mconcat
     , short 'v'
     , help "Print diagnostic information"
     ]
-
-{-
-parsePackageTarget :: Parser PackageTarget
-parsePackageTarget =
-    PackageTarget
-        <$> argument packageFilter (metavar "PACKAGE-TARGET")
-        <*> asum [ mkStack . (:[]) <$> argument pkgDB (metavar "PACKAGE-DB")
-                 , pure $ mkStack []
-                 ]
-  where
-    mkStack dbs = [GlobalPackageDB, UserPackageDB] ++ dbs
--}
 
 packageSelector :: ReadM PackageSelector
 packageSelector = readPackageSelector <$> str

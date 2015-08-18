@@ -152,8 +152,11 @@ moduleNameElemId = Text.pack . map replaceDot
 
 -- | Encode an invisible note in Html. The note can provide helpfull debugging
 -- information when attached to an element that is inspected in the browser.
-storeNote :: (Monad m) => String -> HtmlT m ()
-storeNote = div_ [ class_ "note", style_ "display:none;" ] . toHtml
+storeNote :: String -> HtmlT Program ()
+storeNote s = do
+    enabled <- lift $ getArg includeNotes
+    when enabled $
+        div_ [ class_ "note", style_ "display:none;" ] $ toHtml s
 
 
 renderModuleInterface :: ModuleInterface -> HtmlT Program ()
