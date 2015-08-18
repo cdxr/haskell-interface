@@ -7,7 +7,6 @@ import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
 
 import Data.Monoid
-import Data.Foldable
 import Data.List ( intersperse )
 
 import qualified Data.ByteString.Lazy as BS
@@ -68,11 +67,7 @@ simplePage titleString html = doctypehtml_ $ do
 
 
 renderPackagePage :: PackageInterface -> HtmlT Program ()
-renderPackagePage iface = do
-    let title = showPackageId (pkgId iface)
-    simplePage title $
-        div_ [ class_ "package" ] $
-            renderModuleGroup . toList $ pkgExposedModules iface
+renderPackagePage = renderPackageDiffPage . noDiff
 
 renderPackageDiffPage :: PackageDiff -> HtmlT Program ()
 renderPackageDiffPage pdiff = do
@@ -127,24 +122,6 @@ renderModuleDiffPage t0 t1 mdiff =
           | otherwise = name0 ++ " / " ++ name1 ++ " (module comparison)"
 
 
-renderModuleGroup :: [ModuleInterface] -> HtmlT Program ()
-renderModuleGroup = simpleLinkList makeId makeLink renderModuleInterface
-  where
-    makeId :: ModuleInterface -> Text
-    makeId = moduleNameElemId . moduleName
-
-    makeLink :: (Monad m) => ModuleInterface -> HtmlT m ()
-    makeLink = toHtml . moduleName
-
-
--- | Format a `ModuleName` as a legal html element id.
-moduleNameElemId :: ModuleName -> Text
-moduleNameElemId = Text.pack . map replaceDot
-  where
-    replaceDot c | c == '.' = '-'
-                 | otherwise = c
-
-
 renderModuleDiffGroup :: [Elem ModuleDiff ModuleInterface] -> HtmlT Program ()
 renderModuleDiffGroup = simpleLinkList makeId makeLinkText renderModuleElem
   where
@@ -163,6 +140,14 @@ renderModuleDiffGroup = simpleLinkList makeId makeLinkText renderModuleElem
           where
             cls | isElemChanged e = "change"
                 | otherwise       = "no-change"
+
+
+-- | Format a `ModuleName` as a legal html element id.
+moduleNameElemId :: ModuleName -> Text
+moduleNameElemId = Text.pack . map replaceDot
+  where
+    replaceDot c | c == '.' = '-'
+                 | otherwise = c
 
 
 -- | Encode an invisible note in Html. The note can provide helpfull debugging

@@ -143,6 +143,7 @@ instance Diff Type TypeDiff where
 data TypeDiff'F c
     = TypeDiff'F (DiffTypeF Type c)
     | ChangeContext (ChangeContext Type) c
+    | ChangeFunction (Elem (Replace Type) Type) c
     deriving (Show, Eq, Ord, Functor)
 
 data TypeDiff' = TypeDiff' (TypeDiff'F TypeDiff')
@@ -205,6 +206,16 @@ extendTypeDiff = FF.cata applySpecialCases
         ReplaceTypeF (FF.embed -> t0) (ContextF ps1 t1)
             | t0 `almostEqual` t1 ->
                 ChangeContext (AddedContext ps1) (diff t0 t1)
+
+        ReplaceTypeF (FunF a0 t0) (FunF a1 t1)
+            | t0 `almostEqual` t1 ->
+                ChangeFunction (Elem $ Replace a0 a1) (diff t0 t1)
+        ReplaceTypeF (FunF a0 t0) (FF.embed -> t1)
+            | t0 `almostEqual` t1 ->
+                ChangeFunction (Removed a0) (diff t0 t1)
+        ReplaceTypeF (FF.embed -> t0) (FunF a1 t1)
+            | t0 `almostEqual` t1 ->
+                ChangeFunction (Added a1) (diff t0 t1)
 
         -- None of the above cases
         _ -> TypeDiff'F df

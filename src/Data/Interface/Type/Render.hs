@@ -179,6 +179,9 @@ renderTypeDiff'Alg rc tr td0 = case td0 of
                 AddedContext ps   -> elemView' rc . Added =<< cxt ps
                 ContextElems p ->
                     renderContext $ map renderElemPred (patienceElems p)
+    ChangeFunction cf c ->
+        (,) FunPrec <$> (mappend <$> fun <*> fmap (prec tr TopPrec) c)
+          where fun = renderElemFun cf
     TypeDiff'F dtf -> renderTypeDiffAlg rc tr dtf
   where
     renderElemPred :: Elem (Pred Type) (Pred Type) -> DiffView m
@@ -192,3 +195,13 @@ renderTypeDiff'Alg rc tr td0 = case td0 of
         pure (renderString tr "(") <>
         (joinWith tr ", " <$> sequence ps) <>
         pure (renderString tr ") => ")
+
+    renderFun :: Type -> m
+    renderFun t = renderType tr t <> renderString tr " -> "
+
+    renderElemFun :: Elem (Replace Type) Type -> DiffView m
+    renderElemFun e = case e of
+        Removed t -> elemView' rc $ Removed (renderFun t)
+        Added t   -> elemView' rc $ Added (renderFun t)
+        Elem r    -> changeView $ renderFun <$> toChange r
+
