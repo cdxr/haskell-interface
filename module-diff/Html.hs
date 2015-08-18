@@ -239,6 +239,8 @@ renderExportElem mc (Named n e) = do
         abbr_ [title_ qualName] $ toHtml n
 
     renderElem_ renderEntity renderEntityDiff e
+
+    storeNote $ groom $ Named n e
   where
     qualName = Text.pack $ showChange " => " showQual mc
     showQual m = showQualName $ Qual m n

@@ -40,7 +40,7 @@ instance Diff Entity EntityDiff where
     diff a b = case (a,b) of
         (LocalValue vd0, LocalValue vd1) -> LocalValueDiff (diff vd0 vd1)
         (LocalType td0, LocalType td1)   -> LocalTypeDiff (diff td0 td1)
-        _ -> EntityDiff (Change a b)
+        _ -> EntityDiff (diff a b)
 
 
 -- * ValueDecl

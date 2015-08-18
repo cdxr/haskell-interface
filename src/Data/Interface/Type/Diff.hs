@@ -213,10 +213,25 @@ extendTypeDiff = FF.cata applySpecialCases
     almostEqual = (==)  -- TODO
 
 
+stripForallDiff :: DiffTypeF Type TypeDiff -> DiffTypeF Type TypeDiff
+stripForallDiff td = case td of
+    NoDiffTypeF t -> NoDiffTypeF $ stripTerm t
+    ReplaceTypeF t0 t1 -> ReplaceTypeF (stripTerm t0) (stripTerm t1)
+    SameTypeF (ForallF _ c) -> FF.project c
+    _ -> td
+  where
+    stripTerm :: TypeF Type -> TypeF Type
+    stripTerm = FF.project . stripForall . FF.embed
+
+
 stripForallDiff' :: TypeDiff' -> TypeDiff'
 stripForallDiff' (TypeDiff' td0) = case td0 of
     TypeDiff'F (NoDiffTypeF t) ->
-        TypeDiff' $ TypeDiff'F $ NoDiffTypeF $
-            FF.project . stripForall $ FF.embed t
+        TypeDiff' $ TypeDiff'F $ NoDiffTypeF $ stripTerm t
+    TypeDiff'F (ReplaceTypeF t0 t1) ->
+        TypeDiff' $ TypeDiff'F $ diff (stripTerm t0) (stripTerm t1)
     TypeDiff'F (SameTypeF (ForallF _ c)) -> c
     _ -> TypeDiff' td0
+  where
+    stripTerm :: TypeF Type -> TypeF Type
+    stripTerm = FF.project . stripForall . FF.embed

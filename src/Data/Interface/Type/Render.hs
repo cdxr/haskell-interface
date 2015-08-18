@@ -179,12 +179,6 @@ renderTypeDiff'Alg rc tr td0 = case td0 of
                 AddedContext ps   -> elemView' rc . Added =<< cxt ps
                 ContextElems p ->
                     renderContext $ map renderElemPred (patienceElems p)
-    {-
-    NoDiffApply t0 ts -> case (t0, ts) of
-        (Type.Con (Qual _ "[]"), [a]) ->
-            renderString tr "[" ++ renderType tr a ++ renderString tr "]"
-        _ -> pure (AppPrec, renderType tr $ apply t0 ts)
-    -}
     TypeDiff'F dtf -> renderTypeDiffAlg rc tr dtf
   where
     renderElemPred :: Elem (Pred Type) (Pred Type) -> DiffView m
