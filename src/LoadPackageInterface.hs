@@ -29,7 +29,6 @@ import GHC
 import DynFlags
 import qualified Outputable as Out
 import qualified Packages as GHC
-import qualified Linker as GHC ( linkPackages )
 
 import Distribution.Text as Cabal
 import Distribution.Package as Cabal
@@ -95,7 +94,8 @@ ghcLocPackage (LocPackage db ipi) = do
         SpecificPackageDB fp -> PkgConfFile fp
 
     pkgArg :: InstalledPackageInfo -> PackageArg
-    pkgArg = PackageIdArg . Cabal.display . Cabal.installedPackageId
+    pkgArg = PackageKeyArg . Cabal.display . packageKey
+    --pkgArg = PackageIdArg . Cabal.display . Cabal.installedPackageId
 
     modRenaming = ModRenaming True []
 

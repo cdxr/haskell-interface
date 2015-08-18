@@ -61,6 +61,7 @@ executable module-diff
     transformers,
     containers,
     filepath,
+    directory >=1.2,
     recursion-schemes,
     text >=1.2 && <1.3,
     bytestring >=0.10 && <0.11,

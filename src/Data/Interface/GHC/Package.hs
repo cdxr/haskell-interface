@@ -35,13 +35,14 @@ resetPackageDB :: PackageEnv -> PackageDB -> IO ()
 resetPackageDB env pdb =
     modifyIORef (packageDBRef env) $ Map.delete pdb
 
-getPackageIndex :: PackageEnv -> PackageDB -> IO InstalledPackageIndex
-getPackageIndex env pdb = do
+getPackageIndex :: Bool -> PackageEnv -> PackageDB -> IO InstalledPackageIndex
+getPackageIndex v env pdb = do
     m <- readIORef (packageDBRef env)
     case Map.lookup pdb m of
         Just ipi -> pure ipi
         Nothing -> do
-            ipi <- getPackageDBContents silent pdb (programDB env)
+            let verbosity = if v then verbose else silent
+            ipi <- getPackageDBContents verbosity pdb (programDB env)
             atomicWriteIORef (packageDBRef env) $ Map.insert pdb ipi m
             pure ipi
 
@@ -87,15 +88,19 @@ showLocPackage (LocPackage db ipi) =
         UserPackageDB -> "[user]"
         SpecificPackageDB fp -> "(" ++ fp ++ ")"
 
+-- | Produce a list of package locations for the given `PackageSelector` and 
+-- database stack. If the first argument is `True`, this will be done
+-- verbosely.
 packageLocations ::
+    Bool ->
     PackageEnv ->
     PackageSelector ->
     [PackageDB] ->
     IO [LocPackage]
-packageLocations env sel = fmap concat . mapM list
+packageLocations v env sel = fmap concat . mapM list
   where
     list :: PackageDB -> IO [LocPackage]
     list db = do
-        pix <- getPackageIndex env db 
+        pix <- getPackageIndex v env db 
         pure [ LocPackage db pkg | pkg <- filterPackages sel pix ]
 

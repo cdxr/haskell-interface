@@ -26,7 +26,7 @@ main = runProgram start =<< parseProgramArgs
 start :: Program ()
 start = do
     whenArgs_ outputClassInstances $
-        error "--instances: unimplemented"
+        error "--instances: currently disabled"
 
     format <- getArg outputFormat
     output format =<< loadTarget =<< resolveProgramTarget
@@ -52,17 +52,21 @@ loadTarget t = case t of
 
 
 loadPackage :: PackageTarget -> Program PackageInterface
-loadPackage (Target mdb sel) = do
-    lps <- withPackageEnv $ \env -> packageLocations env sel dbStack
+loadPackage target@(Target mdb sel) = do
+    dbStack <- case mdb of
+        Nothing -> getDefaultDBStack
+        Just db -> pure [db]
+
+    verbose $ "loading package target: " ++ showPackageSelector sel
+           ++ "\n using DB stack: " ++ show dbStack
+
+    v <- (== Verbose) <$> getArg verbosity
+    lps <- withPackageEnv $ \env -> packageLocations v env sel dbStack
     case lps of
         [] -> error $ "could not find package: " ++ showPackageSelector sel
         lp:_ -> do
             f <- getVerbosePrinter 
             liftIO $ makePackageInterface f lp
-  where
-    dbStack = case mdb of
-        Nothing -> [GlobalPackageDB, UserPackageDB]
-        Just db -> [db]
 
 
 loadModule :: ModuleTarget -> Program ModuleInterface

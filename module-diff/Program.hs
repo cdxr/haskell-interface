@@ -12,23 +12,33 @@ import LoadPackageInterface
 import Data.Interface
 
 import ProgramArgs
+import Paths
 
 
-type ProgramEnv = (ProgramArgs, PackageEnv)
+data ProgramEnv = ProgramEnv
+    { programArgs :: ProgramArgs
+    , programDefaultDBs :: [PackageDB]
+    , packageEnv :: PackageEnv
+    }
 
 newtype Program a = Program (ReaderT ProgramEnv (StateT QualContext IO) a)
     deriving (Functor, Applicative, Monad, MonadIO)
 
 runProgram :: Program a -> ProgramArgs -> IO a
 runProgram (Program m) args = do
-    e <- newPackageEnv
-    evalStateT (runReaderT m (args, e)) defQualContext
+    env <- ProgramEnv args
+               <$> Paths.initDefaultDBStack (verbosity args)
+               <*> newPackageEnv
+    evalStateT (runReaderT m env) defQualContext
 
 getArg :: (ProgramArgs -> a) -> Program a
-getArg f = Program $ asks (f . fst)
+getArg f = Program $ asks (f . programArgs)
+
+getDefaultDBStack :: Program [PackageDB]
+getDefaultDBStack = Program $ asks programDefaultDBs
 
 withPackageEnv :: (PackageEnv -> IO a) -> Program a
-withPackageEnv f = liftIO . f =<< Program (asks snd)
+withPackageEnv f = liftIO . f =<< Program (asks packageEnv)
 
 getQualContext :: Program QualContext
 getQualContext = Program (lift get)
