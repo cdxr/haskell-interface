@@ -57,8 +57,8 @@ instance (Eq a) => Monoid (OrdSet a) where
 
 
 data OrdSetDiff a = OrdSetDiff
-    { oldOrdSet :: OrdSet a
-    , newOrdSet :: OrdSet a
+    { _oldOrdSet  :: OrdSet a
+    , _newOrdSet  :: OrdSet a
     , ixmapOrdSet :: MapDiffEq a Int
     }
 

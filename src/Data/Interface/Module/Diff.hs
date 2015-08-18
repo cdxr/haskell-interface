@@ -69,13 +69,13 @@ instance Diff ModuleInterface ModuleDiff where
 
 
 lookupExportElem :: SetElem ExportName -> ModuleDiff -> ExportElem
-lookupExportElem e mdiff =
-    Named n $ mapElem (fromChange . fmap unName) $ fmap unName elem
+lookupExportElem se mdiff =
+    Named n $ mapElem (fromChange . fmap unName) $ fmap unName e
   where
-    n = rawName $ extractSetElem e
+    n = rawName $ extractSetElem se
 
-    elem :: Elem (Change (Named Entity)) (Named Entity)
-    elem = (unsafeFindExport <$> toChange mdiff) `applyChange` setElemChange e
+    e :: Elem (Change (Named Entity)) (Named Entity)
+    e = (unsafeFindExport <$> toChange mdiff) `applyChange` setElemChange se
 
 
 isLocalElemChange ::
@@ -85,9 +85,12 @@ isLocalElemChange ::
 isLocalElemChange e mdiff = applyChange (flip isLocal <$> toChange mdiff) e
 
 
-diffModuleExports :: ModuleDiff -> [ExportElem]
-diffModuleExports mdiff =
+exportElems :: ModuleDiff -> [ExportElem]
+exportElems mdiff =
     map exportElem . ordSetDiffElems $ diffModuleExportList mdiff
   where
     exportElem :: SetElem ExportName -> ExportElem
     exportElem e = lookupExportElem e mdiff
+
+summarizeExports :: ModuleDiff -> ElemSummary
+summarizeExports = summarize . ordSetDiffElems . diffModuleExportList

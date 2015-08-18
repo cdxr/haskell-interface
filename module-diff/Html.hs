@@ -82,7 +82,6 @@ renderPackageDiffPage pdiff = do
             renderPackageDiff pdiff
 
 
-
 createLink ::
     (Monad m, Monad n) =>
     Text ->                  -- ^ unique element id
@@ -147,7 +146,7 @@ moduleNameElemId = Text.pack . map replaceDot
 
 
 renderModuleDiffGroup :: [Elem ModuleDiff ModuleInterface] -> HtmlT Program ()
-renderModuleDiffGroup = simpleLinkList makeId makeLinkText render
+renderModuleDiffGroup = simpleLinkList makeId makeLinkText renderModuleElem
   where
     makeId :: Elem ModuleDiff ModuleInterface -> Text
     makeId e = case e of
@@ -157,16 +156,13 @@ renderModuleDiffGroup = simpleLinkList makeId makeLinkText render
 
     makeLinkText :: (Monad m) => Elem ModuleDiff ModuleInterface -> HtmlT m ()
     makeLinkText e = case e of
-        Removed m -> span_ [ class_ "removed" ] $ toHtml $ moduleName m
-        Added m   -> span_ [ class_ "added" ] $ toHtml $ moduleName m
+        Removed m -> formatRemoved $ toHtml $ moduleName m
+        Added m   -> formatRemoved $ toHtml $ moduleName m
         Elem c -> span_ [ class_ cls ] $
                     toHtml $ showChange " => " id (diffModuleName c)
           where
             cls | isElemChanged e = "change"
                 | otherwise       = "no-change"
-
-    render :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
-    render = renderElem_ renderModuleInterface renderModuleDiff
 
 
 -- | Encode an invisible note in Html. The note can provide helpfull debugging
@@ -178,38 +174,56 @@ storeNote = div_ [ class_ "note", style_ "display:none;" ] . toHtml
 renderModuleInterface :: ModuleInterface -> HtmlT Program ()
 renderModuleInterface = renderModuleDiff . noDiff
 
-
 renderModuleDiff :: ModuleDiff -> HtmlT Program ()
-renderModuleDiff mdiff = do
+renderModuleDiff = renderModuleElem . Elem
+
+renderModuleElem :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
+renderModuleElem moduleElem = do
     onlyChanges <- lift $ getArg onlyShowChanges
 
-    let mc = diffModuleName mdiff
-        exports = diffModuleExports mdiff
+    let mdiff = joinElem moduleElem
+        nameElem = diffModuleName mdiff
+        exports = exportElems $ joinElem moduleElem
         visibleExports
             | onlyChanges = filter (isElemChanged . unName) exports
             | otherwise = exports
 
     div_ [ class_ "module" ] $ do
-        h2_ $ toHtml $ showChange " => " id mc
+        h2_ $ toHtml $ showChange " => " id nameElem
 
-        renderElemSummary $ summarize (map unName exports)
+        renderElemSummary moduleElem
 
         ol_ [ class_ "export-list" ] $
-            mapM_ (li_ . renderExportElem mc) $ reverse visibleExports
+            mapM_ (li_ . renderExportElem nameElem) $ reverse visibleExports
 
 
-renderElemSummary :: ElemSummary -> HtmlT Program ()
-renderElemSummary es =
+renderElemSummary :: Elem ModuleDiff ModuleInterface -> HtmlT Program ()
+renderElemSummary moduleElem =
     div_ [ class_ "elem-summary" ] $
-        mconcat $ intersperse ", " $ visibleStats
+        case moduleElem of
+            Removed iface ->
+                formatRemoved $ toHtml $
+                    "removed module (" ++ countExports iface ++ " exports)"
+            Added iface ->
+                formatAdded $ toHtml $
+                    "added module (" ++ countExports iface ++ " exports)"
+            Elem mdiff ->
+                mconcat $ intersperse ", " $
+                    visibleStats (summarizeExports mdiff)
   where
-    visibleStats = [ go s n | (s,n) <- stats, n > 0 ]
+    countExports = show . length . moduleExportList
+
     stats =
-        [ ("removed",   removedCount es)
-        , ("added",     addedCount es)
-        , ("changed",   changedCount es)
-        , ("unchanged", unchangedCount es)
+        [ ("removed",   removedCount)
+        , ("added",     addedCount)
+        , ("changed",   changedCount)
+        , ("unchanged", unchangedCount)
         ]
+
+    visibleStats summary =
+        [ go s n | (s,f) <- stats
+                 , let n = f summary
+                 , n > 0 ]
 
     go :: (Monad m) => String -> Int -> HtmlT m ()
     go s n = span_ [ class_ (Text.pack s) ] $
@@ -221,8 +235,9 @@ renderPackageDiff = renderModuleDiffGroup . elemList . diffPkgExposedModules
 
 renderExportElem :: Change ModuleName -> ExportElem -> HtmlT Program ()
 renderExportElem mc (Named n e) = do
-    dfn_ [ class_ $ "export-id " <> changeClass ] $
-        abbr_ [ title_ qualName ] $ toHtml n
+    formatAs e $ dfn_ [class_ "export-id "] $
+        abbr_ [title_ qualName] $ toHtml n
+
     renderElem_ renderEntity renderEntityDiff e
   where
     qualName = Text.pack $ showChange " => " showQual mc
@@ -313,8 +328,8 @@ renderElem ::
     (c -> HtmlT m c') ->     -- ^ persistent element
     Elem c a -> HtmlT m (Elem c' a')
 renderElem fa fc e = case e of
-    Removed a -> span_ [ class_ "removed" ] (Removed <$> fa a)
-    Added a   -> span_ [ class_ "added" ] (Added <$> fa a)
+    Removed a -> formatRemoved $ Removed <$> fa a
+    Added a   -> formatAdded $ Added <$> fa a
     Elem c    -> Elem <$> fc c
 
 renderElem_ ::
@@ -340,6 +355,7 @@ renderChange f (Change x y) =
 renderChange_ :: (Monad m) => (a -> HtmlT m ()) -> Change a -> HtmlT m ()
 renderChange_ f = void . renderChange f
 
+
 showChange ::
     String ->           -- ^ separator
     (a -> String) ->    -- ^ renderer
@@ -347,3 +363,19 @@ showChange ::
 showChange s f c = case c of
     NoChange a -> f a
     Change a b -> f a ++ s ++ f b
+
+
+formatAs :: (ToChange a c, Monad m) => Elem c a -> HtmlT m r -> HtmlT m r
+formatAs e html = with html [class_ cls]
+  where
+    cls = case e of
+        Removed{} -> "removed "
+        Added{}   -> "added "
+        Elem c | isChanged c -> "changed "
+               | otherwise   -> "not-changed "
+
+formatAdded :: (Monad m) => HtmlT m a -> HtmlT m a
+formatAdded = span_ [ class_ "added" ]
+
+formatRemoved :: (Monad m) => HtmlT m a -> HtmlT m a
+formatRemoved = span_ [ class_ "removed" ]

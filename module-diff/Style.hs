@@ -37,6 +37,9 @@ mainStyle = do
         highlightChange
         color additionColor
 
+    ".changed" & do
+        highlightChange
+
     ".package" & do
         star # ".links" <? listStyleType none
 

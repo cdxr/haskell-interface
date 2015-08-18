@@ -196,6 +196,12 @@ instance Diff a (Replace a) where
     noDiff a = Replace a a
 
 
+-- `Same` uniquely implements `ToChange` without also implementing `Diff`.
+instance ToChange a (Same a) where
+    toChange (Same a) = NoChange a
+
+
+
 -- | When @c@ represents a change to a value of type @c@, @Elem c a@ is 
 -- a change, a newly-added @a@, or a removed @a@.
 data Elem c a
@@ -213,7 +219,7 @@ getRemoved e = case e of
 getAdded :: Elem c a -> Maybe a
 getAdded e = case e of
     Added a -> Just a
-    _         -> Nothing
+    _       -> Nothing
 
 getElem :: Elem c a -> Maybe c
 getElem e = case e of
@@ -225,6 +231,12 @@ elemMaybe e = case e of
     Removed a -> Change (Just a) Nothing
     Added a   -> Change Nothing (Just a)
     Elem c    -> Just <$> toChange c
+
+joinElem :: (Diff a c) => Elem c a -> c
+joinElem e = case e of
+    Removed a -> noDiff a
+    Added a   -> noDiff a
+    Elem c    -> c
 
 
 -- | Analagous to @fromMaybe@. @fromElem x@ is a function that converts an
@@ -432,3 +444,6 @@ summarizeElem e = case e of
     Added{}   -> mempty { addedCount = 1 }
     Elem c | isChanged c -> mempty { changedCount = 1 }
            | otherwise   -> mempty { unchangedCount = 1 }
+
+totalElems :: ElemSummary -> Int
+totalElems (ElemSummary r a c u) = r + a + c + u

@@ -35,6 +35,9 @@ exportReExport (Named n e) = case e of
     ReExport m ns -> Just $ Qual m (SomeName ns n)
     _             -> Nothing
 
+exportToExportElem :: Export -> ExportElem
+exportToExportElem (Named n e) = Named n $ Elem (noDiff e)
+
 
 -- | Produce a triple containing a list of all export names, a list of all
 -- value declarations, and a list of all type declarations.
@@ -70,19 +73,3 @@ instance TraverseNames ExportName where
     traverseNames f en = case en of
         LocalName sn  -> LocalName <$> traverseNames f sn
         ForeignName q -> ForeignName <$> traverseNames f q
-
-
-{-
-data Export
-    = LocalValue (Named ValueDecl)
-    | LocalType (Named TypeDecl)
-    | ReExport (Qual SomeName)
-    deriving (Show, Eq, Ord)
-
-exportName :: Export -> ExportName
-exportName e = case e of
-    LocalValue n -> LocalName (someName n)
-    LocalType n  -> LocalName (someName n)
-    ReExport q   -> ForeignName q
-
--}
